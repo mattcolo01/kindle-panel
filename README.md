@@ -28,10 +28,11 @@ Struttura del repo:
 
 ## Perché un nome host e non l'IP
 
-Lo `xh` incluso in kindle-dash (0.16.1, rustls) **non riesce a fare HTTPS verso un indirizzo IP**. L'errore è `invalid dnsname`; i dettagli sono in [`kindle/UPSTREAM.md`](kindle/UPSTREAM.md). Serve quindi un **nome host** che il DNS della tua LAN (router, Pi-hole, …) risolva nell'IP del server, per esempio `homeserver.lan`.
+Lo `xh` incluso in kindle-dash (0.16.1, rustls) **non riesce a fare HTTPS verso un indirizzo IP**. L'errore è `invalid dnsname`; i dettagli sono in [`kindle/UPSTREAM.md`](kindle/UPSTREAM.md). Serve quindi un **nome host**, e `xh` è un binario statico musl che lo risolve solo tramite DNS o `/etc/hosts`. Non usa mDNS: un nome `.local` funziona solo grazie alla voce in `/etc/hosts`.
 
-- I nomi mDNS `.local` non funzionano: `xh` è un binario statico musl, che risolve solo tramite DNS e `/etc/hosts`.
-- Prima di iniziare, verifica da un PC sulla LAN: `nslookup <NOME_HOST>` deve restituire l'IP del server.
+Non serve alcun record DNS. All'avvio del dashboard, `setup-hosts.sh` aggiunge al Kindle la voce `<WIFI_TEST_IP> <nome host di GATEWAY_URL>` in `/etc/hosts`. Riapre in scrittura il filesystem di sistema, che è in sola lettura, solo se la voce manca o è diversa, e scrive l'esito in `logs/dash.log`. Il nome può quindi essere qualsiasi, per esempio `kindle-gateway.local`, purché coincida con quello passato a `gen-certs.sh`.
+
+In alternativa puoi usare un nome già risolto dal DNS della LAN (router, Pi-hole, …): la voce in `/etc/hosts` punterà comunque all'IP indicato in `WIFI_TEST_IP`.
 
 ---
 
@@ -95,7 +96,7 @@ curl --cacert certs/ca.pem -o /dev/null -w '%{http_code}\n' https://<NOME_HOST>:
 curl -k -H "Authorization: Bearer $T" https://<NOME_HOST>:8443/kindle.png -o /dev/null -w '%{http_code}\n'
 ```
 
-Apri `out.png` e controlla a occhio il risultato. Se hai passato `<IP_LAN>` a `gen-certs.sh`, curl funziona anche con `https://<IP_LAN>:8443`, ma il Kindle deve usare il nome host.
+Apri `out.png` e controlla a occhio il risultato. Se hai passato `<IP_LAN>` a `gen-certs.sh`, curl funziona anche con `https://<IP_LAN>:8443`, ma il Kindle deve usare il nome host. Se il nome non è nel DNS, aggiungi a curl `--resolve <NOME_HOST>:8443:<IP_LAN>`.
 
 Se HA è irraggiungibile, o rifiuta il token, il gateway risponde **503** e il Kindle mantiene l'immagine precedente.
 
@@ -165,7 +166,8 @@ Errori di `xh` da riconoscere:
 | Errore | Causa |
 |---|---|
 | `invalid dnsname` | In `GATEWAY_URL` c'è un IP: va usato il nome host |
-| `failed to lookup address information` | Il DNS della LAN non risolve il nome host |
+| `failed to lookup address information` | Il nome host non si risolve: controlla in `dash.log` le righe `setup-hosts:` e che `GATEWAY_URL` e `WIFI_TEST_IP` siano corretti |
+| `setup-hosts: ...` (errore) | Il dashboard non parte e il Kindle resta utilizzabile. `/etc/hosts` non è stato aggiornato: mancano `GATEWAY_URL`/`WIFI_TEST_IP` oppure il remount di `/` è fallito |
 | `UnknownIssuer` | `local/ca.pem` non è la CA che ha firmato il certificato del gateway |
 | `CertNotValidForName` | Il nome in `GATEWAY_URL` non è nel SAN del certificato |
 | `CertNotValidYet` / `CertExpired` | Probabilmente l'orologio del Kindle è sbagliato (vedi sotto) |

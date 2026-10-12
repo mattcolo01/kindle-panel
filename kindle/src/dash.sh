@@ -28,6 +28,9 @@ init() {
 
   echo "Starting dashboard with $REFRESH_SCHEDULE refresh..."
 
+  # Before stopping the framework, so the Kindle stays usable on failure
+  "$DIR/setup-hosts.sh" || exit 1
+
   /etc/init.d/framework stop
   initctl stop webreader >/dev/null 2>&1
   echo powersave >/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
