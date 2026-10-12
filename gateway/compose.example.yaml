@@ -1,0 +1,32 @@
+# Copia in compose.yaml e adatta le parti segnate.
+# NON aggiungere questo servizio alla configurazione di cloudflared.
+services:
+  kindle-gateway:
+    build: .
+    image: kindle-gateway
+    restart: unless-stopped
+    ports:
+      # Ascolta su tutte le interfacce del server. Per ascoltare solo sull'IP
+      # LAN usa invece: "<IP_LAN>:8443:8443"
+      - "8443:8443"
+    environment:
+      CONFIG_FILE: /config/config.yaml
+      HA_TOKEN_FILE: /run/secrets/ha_token
+      KINDLE_TOKEN_FILE: /run/secrets/kindle_token
+    volumes:
+      # Tutto in sola lettura; ca.key NON va montata.
+      - ./config.yaml:/config/config.yaml:ro
+      - ./certs/server.pem:/certs/server.pem:ro
+      - ./certs/server.key:/certs/server.key:ro
+      - ./secrets/ha_token:/run/secrets/ha_token:ro
+      - ./secrets/kindle_token:/run/secrets/kindle_token:ro
+    networks:
+      - homeassistant
+
+networks:
+  homeassistant:
+    external: true
+    # Sostituisci con la rete Docker del container di HA (docker network ls).
+    # Se HA usa network_mode: host, togli "networks" da qui e dal servizio
+    # e in config.yaml usa ha_url: "http://<IP_LAN>:8123".
+    name: NOME_RETE_DI_HA
