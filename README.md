@@ -28,7 +28,7 @@ Struttura del repo:
 
 ## Dove stanno i file
 
-Il repo contiene solo codice ed esempi. I file del singolo impianto (certificati, token, configurazione, IP) sono **ignorati da git** e vivono in un **repo separato dei secret**, per esempio `kindle-panel-deploy`. Quel repo ricalca gli stessi percorsi relativi di questo, come descritto in [Repo dei secret](#repo-dei-secret).
+Il repo contiene solo codice ed esempi. I file del singolo impianto (certificati, token, configurazione, IP) sono **ignorati da git** e vivono in un **repo separato dei secret**, per esempio `kindle-panel-secrets`. Quel repo ricalca gli stessi percorsi relativi di questo, come descritto in [Repo dei secret](#repo-dei-secret).
 
 | File (percorso nel repo) | Contenuto | Serve su |
 |---|---|---|
@@ -96,7 +96,7 @@ Se il repo dei secret esiste già, clonalo accanto a questo e passa al punto 3. 
 
 ```sh
 git clone https://github.com/<utente>/kindle-panel.git
-mkdir kindle-panel-deploy && cd kindle-panel-deploy && git init
+mkdir kindle-panel-secrets && cd kindle-panel-secrets && git init
 mkdir -p gateway kindle/src/local
 (umask 077 && mkdir -p gateway/secrets)
 
@@ -141,7 +141,7 @@ I secret si copiano nel repo principale **mantenendo i percorsi**; git li ignora
 
 ```sh
 cd kindle-panel
-rsync -a --exclude=.git --exclude=README.md --exclude=.gitignore ../kindle-panel-deploy/ ./
+rsync -a --exclude=.git --exclude=README.md --exclude=.gitignore ../kindle-panel-secrets/ ./
 git status --ignored   # i file copiati devono comparire solo sotto "Ignored files"
 ```
 
@@ -151,7 +151,7 @@ git status --ignored   # i file copiati devono comparire solo sotto "Ignored fil
 # Sul server: codice + secret della sola parte gateway
 git clone https://github.com/<utente>/kindle-panel.git ~/kindle-panel
 # Dal PC:
-rsync -a ../kindle-panel-deploy/gateway/ <SERVER>:~/kindle-panel/gateway/
+rsync -a ../kindle-panel-secrets/gateway/ <SERVER>:~/kindle-panel/gateway/
 # Sul server:
 cd ~/kindle-panel/gateway
 docker compose up -d --build
@@ -166,7 +166,7 @@ Note:
 ### 5. Provare il gateway (dal PC)
 
 ```sh
-cd kindle-panel-deploy
+cd kindle-panel-secrets
 T=$(cat gateway/secrets/kindle_token)
 R="--resolve <NOME_HOST>:8443:<IP_SERVER>"   # serve solo se il PC non risolve <NOME_HOST>
 
@@ -276,7 +276,7 @@ Il Kindle non va toccato: al ciclo successivo scarica la nuova immagine.
 
 ## Repo dei secret
 
-Il repo dei secret (per esempio `kindle-panel-deploy`) contiene **solo** i file ignorati da questo repo, con **gli stessi percorsi relativi**:
+Il repo dei secret (per esempio `kindle-panel-secrets`) contiene **solo** i file ignorati da questo repo, con **gli stessi percorsi relativi**:
 
 ```
 gateway/config.yaml
@@ -287,7 +287,7 @@ kindle/src/local/{ca.pem,token,device.sh}
 ```
 
 - Va tenuto **privato**: contiene la chiave della CA e i token, compreso quello di HA.
-- **Dai secret al repo:** `rsync -a --exclude=.git --exclude=README.md --exclude=.gitignore ../kindle-panel-deploy/ ./`.
+- **Dai secret al repo:** `rsync -a --exclude=.git --exclude=README.md --exclude=.gitignore ../kindle-panel-secrets/ ./`.
 - **Se modifichi un secret nel repo principale o sul server** (per esempio `config.yaml`), ricopialo nel repo dei secret allo stesso percorso e fai il commit.
 - `kindle/dist/` non va nel repo dei secret: contiene binari e si rigenera con `make dist`.
 
