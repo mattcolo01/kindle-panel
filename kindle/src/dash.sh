@@ -6,6 +6,7 @@ DIR="$(dirname "$0")"
 DASH_PNG="$DIR/dash.png"
 FETCH_DASHBOARD_CMD="$DIR/local/fetch-dashboard.sh"
 LOW_BATTERY_CMD="$DIR/local/low-battery.sh"
+LAST_HASH_FILE="$DIR/local/state/last_hash"
 
 REFRESH_SCHEDULE=${REFRESH_SCHEDULE:-"2,32 8-17 * * MON-FRI"}
 FULL_DISPLAY_REFRESH_RATE=${FULL_DISPLAY_REFRESH_RATE:-0}
@@ -31,6 +32,9 @@ init() {
   initctl stop webreader >/dev/null 2>&1
   echo powersave >/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
   lipc-set-prop com.lab126.powerd preventScreenSaver 1
+
+  # The screen does not show the dashboard yet: always draw the first fetch
+  rm -f "$LAST_HASH_FILE"
 }
 
 prepare_sleep() {
@@ -43,6 +47,9 @@ prepare_sleep() {
 
   # Ensure a full screen refresh is triggered after wake from sleep
   num_refresh=$FULL_DISPLAY_REFRESH_RATE
+
+  # Ensure the dashboard is redrawn after wake, even if unchanged
+  rm -f "$LAST_HASH_FILE"
 }
 
 refresh_dashboard() {

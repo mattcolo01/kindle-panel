@@ -1,5 +1,6 @@
 {
   "items": [
-     {"name": "Kindle Dashboard", "action": "/mnt/us/dashboard/start.sh"}
+     {"name": "Avvia dashboard", "action": "/mnt/us/dashboard/start.sh"},
+     {"name": "Ferma dashboard e riavvia", "action": "/mnt/us/dashboard/stop-and-reboot.sh"}
   ]
 }

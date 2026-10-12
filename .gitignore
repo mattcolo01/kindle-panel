@@ -1,0 +1,20 @@
+# kindle: build (upstream .gitignore)
+/kindle/dist
+/kindle/kindle-dash-*.tgz
+/kindle/tmp
+
+# kindle: file per dispositivo, mai nel repo
+/kindle/src/local/ca.pem
+/kindle/src/local/token
+/kindle/src/local/state/
+
+# gateway: certificati, secrets e copie locali degli esempi
+/gateway/certs/
+/gateway/secrets/
+/gateway/config.yaml
+/gateway/compose.yaml
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
