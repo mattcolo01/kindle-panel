@@ -6,6 +6,7 @@
 # kindle: file per dispositivo, mai nel repo
 /kindle/src/local/ca.pem
 /kindle/src/local/token
+/kindle/src/local/device.sh
 /kindle/src/local/state/
 
 # gateway: certificati, secrets e copie locali degli esempi

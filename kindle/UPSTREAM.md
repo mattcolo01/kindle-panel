@@ -63,13 +63,13 @@ Gli altri codici d'uscita sono 1 per errori di connessione o TLS e 2 per il time
    - `REFRESH_SCHEDULE="*/15 7-23 * * *"`;
    - `FULL_DISPLAY_REFRESH_RATE=4`.
 
-   Contiene inoltre `WIFI_TEST_IP` e `GATEWAY_URL`, vuoti e obbligatori, da compilare per il proprio dispositivo.
+   Contiene inoltre `WIFI_TEST_IP` e `GATEWAY_URL`, vuoti e obbligatori. I valori del dispositivo vanno in `local/device.sh`, ignorato da git (modello: `local/device.example.sh`), che `env.sh` carica per primo se esiste.
 4. **`src/stop-and-reboot.sh`** (nuovo): esegue `stop.sh` e poi `reboot`, per la voce KUAL.
 5. **`KUAL/kindle-dash/menu.json`**: voci "Avvia dashboard" (`start.sh`) e "Ferma dashboard e riavvia" (`stop-and-reboot.sh`). La seconda funziona solo mentre il framework Amazon è attivo.
 5b. **`src/setup-hosts.sh`** (nuovo), chiamato da `init()` in `src/dash.sh` prima di `framework stop`: aggiunge `<WIFI_TEST_IP> <host di GATEWAY_URL>` in `/etc/hosts`, così non serve un record DNS. Il filesystem di sistema viene riaperto in scrittura (`mount -o rw,remount /`) solo se la voce manca o è diversa. Se fallisce, il dashboard non parte e il framework resta attivo.
 6. **`Makefile`**:
    - `dist/xh` e `dist/next-wakeup` si estraggono dal tarball della release, con verifica sha256, invece di compilarli con `cross`;
-   - `dist` copia anche `src/local/ca.pem` e `src/local/token` se presenti, perché sono git-ignored;
+   - `dist` copia anche `src/local/ca.pem`, `src/local/token` e `src/local/device.sh` se presenti, perché sono git-ignored;
    - nuovo target `lint` (`shellcheck -s ash` + `shfmt -i 2 -d`, come nella CI upstream).
 
    Il resto è invariato: `wait-for-wifi.sh`, `start.sh`, `stop.sh`, `low-battery.sh`, il log della batteria e `sleeping.png`.

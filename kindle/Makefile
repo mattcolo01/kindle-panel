@@ -1,7 +1,7 @@
 VERSION := v1.0.0-beta.4
 SRC_FILES := $(shell find src -name '*.sh' -o -name '*.png')
 # Per-device files (git-ignored): copied only if present
-DEVICE_FILES := $(wildcard src/local/ca.pem src/local/token)
+DEVICE_FILES := $(wildcard src/local/ca.pem src/local/token src/local/device.sh)
 TARGET_FILES := $(SRC_FILES:src/%=dist/%) $(DEVICE_FILES:src/%=dist/%)
 
 # xh and next-wakeup are not rebuilt: they come from the upstream release

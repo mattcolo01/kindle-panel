@@ -2,13 +2,18 @@
 
 # Export environment variables here
 
-# REQUIRED: LAN IP of the server running kindle-gateway. Used only to check
-# that Wi-Fi is up (ping), so it must be the IP, not the host name.
+# Device-specific values (git-ignored): copy local/device.example.sh to
+# local/device.sh. DIR is set by start.sh, which sources this file.
+# shellcheck disable=SC1091,SC2154
+[ -f "$DIR/local/device.sh" ] && . "$DIR/local/device.sh"
+
+# REQUIRED: LAN IP of the server running kindle-gateway. Used to check that
+# Wi-Fi is up (ping) and as the address of GATEWAY_URL's host in /etc/hosts.
 export WIFI_TEST_IP=${WIFI_TEST_IP:-""}
 
 # REQUIRED: kindle-gateway URL. Use the host name in the server certificate
-# (gen-certs.sh), resolved by the LAN DNS: the bundled xh cannot do HTTPS to
-# an IP address. Example: https://homeserver.lan:8443
+# (gen-certs.sh): the bundled xh cannot do HTTPS to an IP address.
+# setup-hosts.sh maps it to WIFI_TEST_IP. Example: https://kindle-gateway.local:8443
 export GATEWAY_URL=${GATEWAY_URL:-""}
 
 # The Kindle token goes in local/token (one line, not committed to git).
