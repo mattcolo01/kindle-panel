@@ -1,0 +1,12 @@
+# Copia in config.yaml e sostituisci le entità di esempio con le tue.
+# Il gateway legge SOLO le entità elencate qui (lista consentita).
+title: "Casa"
+timezone: "Europe/Rome"
+ha_url: "http://homeassistant:8123"      # rete docker o IP LAN
+rows:                                     # ordine = ordine sullo schermo
+  - entity: sensor.temperatura_soggiorno
+    label: "Soggiorno"
+  - entity: sensor.umidita_soggiorno
+    label: "Umidità"
+  - entity: weather.casa                  # mostra condition e temperature
+    label: "Meteo"
