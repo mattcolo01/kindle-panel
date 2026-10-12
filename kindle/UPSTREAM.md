@@ -6,7 +6,7 @@
 
 ## File vendorizzati
 
-Questi file sono copiati senza modifiche dal commit indicato (commit "Vendor pascalw/kindle-dash at c83842e (unmodified)" di questo repo):
+Questi file sono copiati senza modifiche dal commit indicato (commit `e76dba6` di questo repo):
 
 ```
 LICENSE  Makefile  KUAL/kindle-dash/{config.xml,menu.json}
@@ -16,7 +16,7 @@ src/local/{env.sh,fetch-dashboard.sh,low-battery.sh}
 
 Non sono stati inclusi `README.md`, `CHANGELOG.md`, `docs/`, `example/`, `.github/` e il sorgente di `src/next-wakeup/`, che non serve perché non si ricompila. Gli script in `src/` sono identici a quelli contenuti nel tarball della release `v1.0.0-beta.4` (verificato con `cmp`).
 
-Per vedere tutte le modifiche locali: `git diff <commit vendor> -- kindle/`.
+Per vedere tutte le modifiche locali: `git diff e76dba6 -- kindle/`.
 
 ## Binari dalla release (non ricompilati)
 
