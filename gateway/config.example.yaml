@@ -1,12 +1,21 @@
-# Copia in config.yaml e sostituisci le entità di esempio con le tue.
-# Il gateway legge SOLO le entità elencate qui (lista consentita).
-title: "Casa"
+# Copia in config.yaml e adatta.
 timezone: "Europe/Rome"
 ha_url: "http://homeassistant:8123"      # rete docker o IP LAN
-rows:                                     # ordine = ordine sullo schermo
-  - entity: sensor.temperatura_soggiorno
-    label: "Soggiorno"
-  - entity: sensor.umidita_soggiorno
-    label: "Umidità"
-  - entity: weather.casa                  # mostra condition e temperature
-    label: "Meteo"
+
+# Plancia di HA da mostrare: il suo URL path, cioè la parte dopo l'host
+# nell'indirizzo del browser (http://ha:8123/dashboard-kindle -> dashboard-kindle).
+# Viene disegnata la prima vista; delle card sono supportate solo heading e
+# custom:home-tasks-card (le altre vengono saltate e annotate nel log).
+dashboard: "dashboard-kindle"
+language: "it"                           # it | en: testi della card Home Tasks
+
+# In alternativa a "dashboard", un elenco fisso di entità (lista consentita):
+# il gateway legge SOLO queste. Usa una sola delle due chiavi.
+# title: "Casa"
+# rows:                                  # ordine = ordine sullo schermo
+#   - entity: sensor.temperatura_soggiorno
+#     label: "Soggiorno"
+#   - entity: sensor.umidita_soggiorno
+#     label: "Umidità"
+#   - entity: weather.casa               # mostra condition e temperature
+#     label: "Meteo"

@@ -4,18 +4,24 @@ Pannello e-ink a basso consumo per Home Assistant su un **Kindle 4 Non-Touch** j
 
 Il Kindle esce a intervalli dalla sospensione in RAM e scarica in HTTPS autenticato un PNG generato da un gateway sulla LAN. Ridisegna lo schermo solo se l'immagine è cambiata, poi torna a dormire.
 
+Il PNG mostra una **plancia di Home Assistant** scelta per URL (modalità `dashboard`) oppure un elenco fisso di entità (modalità `rows`).
+
 ```
 Kindle 4 NT (fork kindle-dash, shell + xh)
    │  HTTPS (cert self-signed, CA fissata sul Kindle) + Bearer token del Kindle
    │  solo LAN, via nome host (mappato in /etc/hosts del Kindle)
    ▼
 kindle-gateway (container Python sull'home server)
-   │  REST API di HA (solo GET /api/states/<id>) con token di un utente HA non admin
+   │  token di un utente HA non admin, solo letture:
+   │   - dashboard: WebSocket API (lovelace/config, home_tasks/get_lists, home_tasks/get_tasks)
+   │                + GET /api/states/person.* per i nomi delle persone assegnate
+   │   - rows:      GET /api/states/<id> delle entità elencate
    ▼
 Home Assistant (container)
 ```
 
-- Il gateway legge **solo** le entità elencate in `config.yaml` e disegna l'immagine da sé con Pillow. Non usa browser headless né screenshot di Lovelace.
+- Il gateway disegna l'immagine da sé con Pillow, a partire dai dati. Non usa browser headless né screenshot di Lovelace.
+- In modalità `dashboard` legge la configurazione della plancia e i dati delle sole card supportate (vedi [Modalità dashboard](#modalità-dashboard)). In modalità `rows` legge **solo** le entità elencate in `config.yaml`.
 - Il token di HA non lascia mai il server.
 - `/kindle.png` risponde solo con il token del Kindle. `/healthz` non è autenticato e restituisce solo `ok`. Non c'è nessun altro endpoint, nemmeno `/docs` o `/openapi.json`.
 - **Il servizio NON va aggiunto alla configurazione di cloudflared** né esposto fuori dalla LAN in altro modo.
@@ -32,7 +38,7 @@ Il repo contiene solo codice ed esempi. I file del singolo impianto (certificati
 
 | File (percorso nel repo) | Contenuto | Serve su |
 |---|---|---|
-| `gateway/config.yaml` | Entità da mostrare, `ha_url`, titolo, fuso orario | server |
+| `gateway/config.yaml` | Plancia (o entità) da mostrare, `ha_url`, lingua, fuso orario | server |
 | `gateway/compose.yaml` | Compose dell'impianto (rete, porte) | server |
 | `gateway/secrets/ha_token` | Token di HA dell'utente dedicato | server |
 | `gateway/secrets/kindle_token` | Token con cui il Kindle si autentica | server |
@@ -90,6 +96,11 @@ Se un aggiornamento fallisce subito e KUAL dice "Mobileread Kindlet Kit is not i
 
 I token di HA danno tutti i permessi dell'utente: per questo l'utente è dedicato e non admin, e il token resta sul server.
 
+Cosa può fare questo token, verificato su HA 2026.6.0:
+- **può** leggere la configurazione di **tutte** le plance, anche quelle con "Solo amministratori": `require_admin` nasconde la plancia solo dalla barra laterale, non la protegge da `lovelace/config`;
+- **non può** modificare le plance: `lovelace/config/save` risponde `unauthorized`;
+- come ogni utente HA, anche non admin, può chiamare servizi. Il gateway però non lo fa mai: invia solo i comandi di lettura elencati sopra, e il codice rifiuta gli altri prima che partano.
+
 ### 2. Repo dei secret (sul PC)
 
 Se il repo dei secret esiste già, clonalo accanto a questo e passa al punto 3. Altrimenti crealo da zero:
@@ -122,8 +133,10 @@ $EDITOR kindle/src/local/device.sh   # WIFI_TEST_IP="<IP_SERVER>"  GATEWAY_URL="
 git add -A && git commit -m "Secrets kindle-panel"
 ```
 
-**`gateway/config.yaml`:**
-- `rows`: le entità da mostrare, nell'ordine in cui appaiono sullo schermo. Per la prima prova `sun.sun` va bene perché esiste in ogni installazione;
+**`gateway/config.yaml`:** va usata una sola tra `dashboard` e `rows`.
+- `dashboard`: l'URL path della plancia, cioè quello che compare nell'indirizzo del browser dopo l'host (`http://<ha>:8123/dashboard-kindle` → `dashboard-kindle`). Lettere, cifre, `-` e `_`, come nella finestra di creazione delle plance di HA;
+- `language`: `it` (default) o `en`. Vale per i testi della card Home Tasks;
+- `rows` (alternativa a `dashboard`): le entità da mostrare, nell'ordine in cui appaiono sullo schermo. Per la prima prova `sun.sun` va bene perché esiste in ogni installazione. `title` è il titolo in cima;
 - `ha_url`:
   - HA con `network_mode: host`: `http://<IP_SERVER>:8123`;
   - HA su una rete Docker condivisa con il gateway: `http://<nome container HA>:8123`.
@@ -176,7 +189,11 @@ curl $R --cacert gateway/certs/ca.pem -H "Authorization: Bearer $T" https://<NOM
 curl $R --cacert gateway/certs/ca.pem -o /dev/null -w '%{http_code}\n' https://<NOME_HOST>:8443/kindle.png
 ```
 
-Una risposta **503** significa che il gateway non raggiunge HA o che HA rifiuta il token: controlla `ha_url`, `secrets/ha_token` e `docker compose logs`.
+Una risposta **503** significa che il gateway non ha potuto disegnare l'immagine. Il Kindle tiene quella precedente. Le cause possibili:
+- non raggiunge HA, oppure HA rifiuta il token;
+- in modalità `dashboard`: la plancia non esiste o non è mai stata modificata, oppure una lista Home Tasks della plancia non esiste più.
+
+Il motivo esatto è in `docker compose logs` (vedi [Log del gateway](#log-del-gateway)).
 
 ### 6. Preparare i file del Kindle (sul PC)
 
@@ -237,10 +254,12 @@ Il dashboard ferma il framework Amazon. Finché è attivo, quindi, **non funzion
 - **Via SSH:** `/mnt/us/dashboard/stop.sh` seguito da `reboot`.
 - **Voce KUAL "Ferma dashboard e riavvia":** funziona solo mentre il framework è attivo. Dopo un avvio normale il framework è fermo e KUAL non è raggiungibile.
 
-### Cambiare le entità
+### Cambiare plancia o entità
 
-1. Modifica `gateway/config.yaml` nel repo dei secret e fai il commit.
-2. Copialo sul server, poi `docker compose restart`.
+- **Contenuto della plancia** (card, liste, task): basta modificarla in HA. Il gateway la rilegge a ogni richiesta, quindi al ciclo successivo il Kindle mostra la versione nuova, senza riavvii.
+- **Quale plancia, oppure le entità di `rows`:**
+  1. modifica `gateway/config.yaml` nel repo dei secret e fai il commit;
+  2. copialo sul server, poi `docker compose restart`.
 
 Il Kindle non va toccato: al ciclo successivo scarica la nuova immagine.
 
@@ -317,6 +336,21 @@ Errori di `xh` da riconoscere:
 | `CertNotValidForName` | Il nome in `GATEWAY_URL` non è nel SAN del certificato |
 | `CertNotValidYet` / `CertExpired` | Probabilmente l'orologio del Kindle è sbagliato (vedi sotto) |
 
+### Log del gateway
+
+`docker compose logs` sul server. In modalità `dashboard`:
+
+| Messaggio | Significato |
+|---|---|
+| `Dashboard '...' not found, or never edited (auto-generated)` | L'URL path in `config.yaml` è sbagliato, oppure la plancia è generata automaticamente da HA e non ha una configurazione salvata |
+| `Dashboard '...' cannot be drawn: ... strategy ...` | La plancia o la sua prima vista è generata da una *strategy*: esiste solo nel browser |
+| `Dashboard '...' cannot be drawn: Home Tasks has no list ...` | La plancia usa un `list_id` che Home Tasks non ha (lista cancellata?) |
+| `Home Assistant refused home_tasks/...: unknown_command` | Home Tasks non è installato o non è caricato |
+| `Home Assistant WebSocket unavailable: HA rejected the token` | Token di HA errato o revocato |
+| `Home Assistant WebSocket unavailable: ...` (altro) | HA non raggiungibile da `ha_url` |
+| `Skipping unsupported cards: ...` | Card presenti nella plancia ma non disegnate (informativo) |
+| `Unsupported upgrade request` / `No supported WebSocket library detected` | Qualcuno ha provato ad aprire un WebSocket sul gateway: viene rifiutato apposta (`--ws none`). Il secondo messaggio di uvicorn è fuorviante: la libreria c'è, ma serve solo verso HA |
+
 ### Orologio
 
 Dopo la fine del supporto Amazon l'ora del Kindle potrebbe non sincronizzarsi più. Verificala con le date nel log. L'ora conta per due motivi:
@@ -336,7 +370,7 @@ Via SSH: `DEBUG=true /mnt/us/dashboard/start.sh`. Gira in primo piano con `set -
 - [ ] Avvio da KUAL: nel log compare `setup-hosts: added ...`.
 - [ ] Il primo disegno avviene.
 - [ ] Un ciclo successivo con dati invariati non ridisegna (`Not updating screen` nel log).
-- [ ] Cambiando un'entità in HA, lo schermo si aggiorna al ciclo successivo.
+- [ ] Cambiando un task (o un'entità in modalità `rows`) in HA, lo schermo si aggiorna al ciclo successivo.
 - [ ] Sospensione e risveglio RTC funzionano.
 - [ ] Livello batteria registrato per 24 ore.
 - [ ] L'ora del Kindle è corretta (`date` nel log).
@@ -346,7 +380,7 @@ Via SSH: `DEBUG=true /mnt/us/dashboard/start.sh`. Gira in primo piano con `set -
 ## Sviluppo
 
 ```sh
-# Test del gateway (HA simulato con respx)
+# Test del gateway (HA simulato: respx per REST, server WebSocket locale per la WebSocket API)
 cd gateway
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
@@ -355,7 +389,45 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 cd kindle && make lint
 ```
 
-## Note sul rendering
+## Modalità dashboard
+
+Il gateway ricostruisce la plancia come la mostrerebbe il browser su uno schermo largo 600 px, senza parti interattive:
+- **solo la prima vista** della plancia;
+- **vista sections:** le sezioni una sotto l'altra, nell'ordine della configurazione. Sotto i 2 × 320 px HA stesso usa una colonna sola e ignora `column_span` (`hui-sections-view.ts`). Le viste a schede (masonry, ecc.) mostrano le card in colonna;
+- **card supportate:** `heading` e `custom:home-tasks-card`. Le altre vengono saltate e annotate nel log (`Skipping unsupported cards`);
+- **non disegnabili:** plance auto-generate o con *strategy*. In entrambi i casi HA non ha una configurazione da leggere: la genera il browser (`ha-panel-lovelace.ts`).
+
+### Card Home Tasks
+
+Il comportamento della card [Home Tasks](https://github.com/L3t4l3s/home-tasks) v2.4.0 (MIT) è portato in Python in `gateway/app/home_tasks.py`. Sono replicati filtri e ordinamento di default della colonna, sezioni, gruppo "Fatto", intestazione con avanzamento e badge: priorità, sotto-attività, scadenza, ricorrenza, persona, tag e promemoria.
+
+Il port è stato confrontato con la card vera, eseguita in jsdom con data congelata: 2000 casi casuali con tutte le combinazioni di opzioni e 0 differenze. I valori attesi in `tests/test_home_tasks.py` sono quelli prodotti dalla card.
+
+Differenze volute:
+- **scadenza oggi con orario:** la card fa il conto alla rovescia ("Tra 2 h 15 min") e il testo cambierebbe a ogni risveglio, ridisegnando lo schermo ogni volta. Il gateway scrive l'ora ("Oggi 18:00");
+- **parti interattive omesse:** campo "aggiungi", microfono, filtri, ordinamento, chip di tag e persone;
+- **immagini mai scaricate:** foto dei task e delle persone. Al posto della foto della persona ci sono le iniziali, come fa la card quando la foto manca;
+- **icone:** le icone `mdi:` di sezioni e titoli non vengono disegnate. Persona e promemoria (👤 e ⏰ della card) sono disegnati a mano, perché DejaVu Sans non ha quei caratteri;
+- **sezioni sempre aperte:** lo stato "chiusa" di una sezione la card lo salva nel `localStorage` del browser, dove il gateway non arriva;
+- **liste esterne** (colonne con `entity_id`, es. Todoist): non supportate, la colonna viene saltata;
+- **font:** circa il doppio di quelli del browser, per leggere il pannello a distanza. Se lo spazio finisce, il resto non viene disegnato e in fondo compare `+N`, il numero di task esclusi;
+- **emoji nei titoli:** DejaVu Sans non le ha, quindi appaiono come un rettangolino.
+
+### Security e consumi
+
+- **Comandi verso HA:** sul WebSocket partono solo `auth` e i comandi di `ALLOWED_COMMANDS` in `app/ha_ws.py`, tutti di lettura. Ogni altro comando viene rifiutato dal codice prima di essere inviato.
+- **Token di HA:**
+  - non passa mai da un proxy preso dall'ambiente;
+  - non segue redirect. La libreria `websockets` li seguirebbe anche verso altri host, e il token viaggia nel primo messaggio dopo l'handshake.
+- **Limiti:**
+  - messaggi da HA fino a 8 MiB;
+  - al massimo 50 card, 10 colonne per card, 500 task per lista, 300 caratteri per testo;
+  - 10 s per la conversazione WebSocket.
+- **Gateway:** non accetta WebSocket in ingresso (`--ws none`).
+- **Determinismo:** l'immagine dipende solo da ciò che si vede. Note, cronologia e altri campi non disegnati non la cambiano, quindi il Kindle non ridisegna lo schermo. Cambia anche a mezzanotte, perché "Oggi"/"Domani" si spostano.
+- **Tempi:** su HA 2026.6.0 una richiesta completa (TLS, WebSocket verso HA, rendering) ha richiesto circa 0,1 s sul server.
+
+## Note sul rendering (modalità rows)
 
 - **Immagine:** 600×800, modalità `L` (8 bit, scala di grigi, senza alpha), font DejaVu Sans, nero su bianco. Il testo è antialiasato, quindi ci sono grigi solo sui bordi dei caratteri.
 - **Determinismo:** l'immagine dipende solo dai dati, così il Kindle può saltare il refresh:

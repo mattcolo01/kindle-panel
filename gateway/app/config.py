@@ -8,11 +8,19 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from .i18n import LANGUAGES
+
 DEFAULT_CONFIG_FILE = "/config/config.yaml"
+DEFAULT_LANGUAGE = "it"
 
 # Entity ids are interpolated into the HA URL path, so only accept the
 # canonical "<domain>.<object_id>" form.
 ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+
+# Dashboard URL path, as in the browser address bar (/dashboard-kindle). The
+# characters the HA dashboard dialog accepts (a-zA-Z0-9_-, see
+# dialog-lovelace-dashboard-detail.ts), single words included ("lovelace").
+DASHBOARD_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
 
 class ConfigError(Exception):
@@ -30,9 +38,11 @@ class Settings:
     title: str
     timezone: ZoneInfo
     ha_url: str
-    rows: tuple[Row, ...]
+    rows: tuple[Row, ...]  # empty in dashboard mode
     ha_token: str
     kindle_token: str
+    dashboard: str | None = None  # url_path; None in rows mode
+    language: str = DEFAULT_LANGUAGE
 
 
 def read_secret(name: str, env: dict[str, str]) -> str:
@@ -52,7 +62,25 @@ def read_secret(name: str, env: dict[str, str]) -> str:
     return value
 
 
-def parse_config(data: object) -> tuple[str, ZoneInfo, str, tuple[Row, ...]]:
+def parse_rows(raw_rows: object) -> tuple[Row, ...]:
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise ConfigError("rows must be a non-empty list")
+    rows = []
+    for i, raw in enumerate(raw_rows):
+        if not isinstance(raw, dict):
+            raise ConfigError(f"rows[{i}] must be a mapping")
+        entity = raw.get("entity")
+        if not isinstance(entity, str) or not ENTITY_ID_RE.match(entity):
+            raise ConfigError(f"rows[{i}].entity is not a valid entity id: {entity!r}")
+        label = raw.get("label", entity)
+        if not isinstance(label, str):
+            raise ConfigError(f"rows[{i}].label must be a string")
+        rows.append(Row(entity=entity, label=label))
+    return tuple(rows)
+
+
+def parse_config(data: object) -> dict:
+    """Validate config.yaml; return the Settings fields other than the secrets."""
     if not isinstance(data, dict):
         raise ConfigError("config.yaml must be a mapping")
 
@@ -72,22 +100,31 @@ def parse_config(data: object) -> tuple[str, ZoneInfo, str, tuple[Row, ...]]:
     if not isinstance(ha_url, str) or not re.match(r"^https?://", ha_url):
         raise ConfigError("ha_url must be an http:// or https:// URL")
 
-    raw_rows = data.get("rows")
-    if not isinstance(raw_rows, list) or not raw_rows:
-        raise ConfigError("rows must be a non-empty list")
-    rows = []
-    for i, raw in enumerate(raw_rows):
-        if not isinstance(raw, dict):
-            raise ConfigError(f"rows[{i}] must be a mapping")
-        entity = raw.get("entity")
-        if not isinstance(entity, str) or not ENTITY_ID_RE.match(entity):
-            raise ConfigError(f"rows[{i}].entity is not a valid entity id: {entity!r}")
-        label = raw.get("label", entity)
-        if not isinstance(label, str):
-            raise ConfigError(f"rows[{i}].label must be a string")
-        rows.append(Row(entity=entity, label=label))
+    if ("rows" in data) == ("dashboard" in data):
+        raise ConfigError("Set exactly one of rows (entity list) and dashboard (HA dashboard URL path)")
+    rows: tuple[Row, ...] = ()
+    dashboard = None
+    if "rows" in data:
+        rows = parse_rows(data["rows"])
+    else:
+        dashboard = data["dashboard"]
+        if not isinstance(dashboard, str) or not DASHBOARD_RE.match(dashboard):
+            raise ConfigError(
+                f"dashboard must be the dashboard URL path, e.g. dashboard-kindle: {dashboard!r}"
+            )
 
-    return title, timezone, ha_url.rstrip("/"), tuple(rows)
+    language = data.get("language", DEFAULT_LANGUAGE)
+    if language not in LANGUAGES:
+        raise ConfigError(f"language must be one of {', '.join(LANGUAGES)}: {language!r}")
+
+    return {
+        "title": title,
+        "timezone": timezone,
+        "ha_url": ha_url.rstrip("/"),
+        "rows": rows,
+        "dashboard": dashboard,
+        "language": language,
+    }
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:
@@ -99,12 +136,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     except OSError as e:
         raise ConfigError(f"Cannot read config file {config_file}: {e}") from e
 
-    title, timezone, ha_url, rows = parse_config(data)
     return Settings(
-        title=title,
-        timezone=timezone,
-        ha_url=ha_url,
-        rows=rows,
+        **parse_config(data),
         ha_token=read_secret("HA_TOKEN", env),
         kindle_token=read_secret("KINDLE_TOKEN", env),
     )

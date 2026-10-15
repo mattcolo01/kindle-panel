@@ -13,6 +13,8 @@ RUN useradd --system --uid 10001 --no-create-home gateway
 USER 10001
 
 EXPOSE 8443
+# --ws none: websockets is installed (client towards HA), but the gateway
+# serves no WebSocket and uvicorn would otherwise accept upgrades.
 CMD ["uvicorn", "--factory", "app.main:create_app", \
-     "--host", "0.0.0.0", "--port", "8443", \
+     "--host", "0.0.0.0", "--port", "8443", "--ws", "none", \
      "--ssl-keyfile", "/certs/server.key", "--ssl-certfile", "/certs/server.pem"]
