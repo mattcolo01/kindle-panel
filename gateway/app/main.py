@@ -29,6 +29,18 @@ from .render import build_view, check_fonts, parse_battery, render
 from .render_dashboard import render_dashboard
 
 log = logging.getLogger(__name__)
+APP_LOGGER = "app"
+
+
+def setup_logging() -> None:
+    """uvicorn configures only its own loggers: without a handler here the
+    app's INFO messages (e.g. skipped cards) would never reach the log."""
+    logger = logging.getLogger(APP_LOGGER)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 def is_authorized(request: Request, token: str) -> bool:
@@ -71,6 +83,7 @@ async def dashboard_png(settings: Settings, ha: HAClient, battery: int | None) -
 def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = load_settings()
+    setup_logging()
     check_fonts()
 
     @asynccontextmanager
