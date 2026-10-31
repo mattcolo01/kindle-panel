@@ -45,6 +45,14 @@ class FakeHA:
             if message.get("list_id") not in self.tasks:
                 return {"success": False, "error": {"code": "invalid_request", "message": "List not found"}}
             return {"success": True, "result": self.tasks[message["list_id"]]}
+        if command == "home_tasks/update_task":
+            tasks = self.tasks.get(message.get("list_id"), {}).get("tasks", [])
+            task = next((t for t in tasks if t.get("id") == message.get("task_id")), None)
+            if task is None:
+                return {"success": False, "error": {"code": "not_found", "message": "Task not found"}}
+            if "completed" in message:
+                task["completed"] = message["completed"]
+            return {"success": True, "result": task}
         return {"success": False, "error": {"code": "unknown_command", "message": "Unknown command."}}
 
     def handler(self, ws: ServerConnection) -> None:

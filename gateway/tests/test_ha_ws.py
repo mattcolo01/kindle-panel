@@ -121,3 +121,29 @@ def test_server_that_never_answers_stops(monkeypatch):
     with running(chatty) as port:
         with pytest.raises(HAUnavailable):
             run(get_config(f"http://127.0.0.1:{port}"))
+
+
+async def send_command(url: str, command: str, **fields):
+    async with ha_websocket(url, HA_TOKEN) as ws:
+        return await ws.command(command, **fields)
+
+
+def test_completing_a_task_is_the_only_write():
+    with fake_ha(HA_TOKEN) as ha:
+        ha.tasks["L1"] = {"tasks": [{"id": "t1", "completed": False}], "sections": []}
+        run(send_command(ha.url, "home_tasks/update_task", list_id="L1", task_id="t1", completed=True))
+    assert ha.tasks["L1"]["tasks"][0]["completed"] is True
+
+
+@pytest.mark.parametrize("fields", [
+    {"list_id": "L1", "task_id": "t1", "completed": False},  # reopening
+    {"list_id": "L1", "task_id": "t1", "completed": 1},
+    {"list_id": "L1", "task_id": "t1", "completed": True, "title": "altro"},
+    {"list_id": "L1", "task_id": "t1", "notes": "x"},
+    {"list_id": "L1", "completed": True},
+])
+def test_update_task_other_than_completing_is_refused(fields):
+    with fake_ha(HA_TOKEN) as ha:
+        with pytest.raises(ValueError):
+            run(send_command(ha.url, "home_tasks/update_task", **fields))
+    assert ha.commands == ["auth"]

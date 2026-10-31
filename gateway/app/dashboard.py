@@ -61,6 +61,7 @@ class TasksCard:
 class DashboardView:
     blocks: tuple[Heading | TasksCard, ...]
     battery: int | None  # percent, multiple of 5
+    buttons: tuple[str, ...] = ()  # Kindle buttons to give to open tasks, in order
 
 
 def first_view_cards(config: object) -> list:
@@ -209,6 +210,7 @@ def build_view(
     language: str,
     today: date,
     battery: int | None,
+    buttons: tuple[str, ...] = (),
 ) -> DashboardView:
     blocks: list[Heading | TasksCard] = []
     for block in data.blocks:
@@ -220,6 +222,6 @@ def build_view(
             # A column without a list stays empty, as in the card
             task_list, sections = data.tasks.get(col.list_id, ([], [])) if col.list_id else ([], [])
             columns.append(column_view(col.options, data.list_names.get(col.list_id), task_list, sections,
-                                       persons, language, today))
+                                       persons, language, today, col.list_id))
         blocks.append(TasksCard(block.title, tuple(columns)))
-    return DashboardView(tuple(blocks), battery)
+    return DashboardView(tuple(blocks), battery, buttons)

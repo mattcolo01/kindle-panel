@@ -12,10 +12,11 @@ Kindle 4 NT (fork kindle-dash, shell + xh)
    │  solo LAN, via nome host (mappato in /etc/hosts del Kindle)
    ▼
 kindle-gateway (container Python sull'home server)
-   │  token di un utente HA non admin, solo letture:
+   │  token di un utente HA non admin, letture:
    │   - dashboard: WebSocket API (lovelace/config, home_tasks/get_lists, home_tasks/get_tasks)
    │                + GET /api/states/person.* per i nomi delle persone assegnate
    │   - rows:      GET /api/states/<id> delle entità elencate
+   │  e, solo con `buttons:` attivo, una scrittura: home_tasks/update_task {completed: true}
    ▼
 Home Assistant (container)
 ```
@@ -23,7 +24,7 @@ Home Assistant (container)
 - Il gateway disegna l'immagine da sé con Pillow, a partire dai dati. Non usa browser headless né screenshot di Lovelace.
 - In modalità `dashboard` legge la configurazione della plancia e i dati delle sole card supportate (vedi [Modalità dashboard](#modalità-dashboard)). In modalità `rows` legge **solo** le entità elencate in `config.yaml`.
 - Il token di HA non lascia mai il server.
-- `/kindle.png` risponde solo con il token del Kindle. `/healthz` non è autenticato e restituisce solo `ok`. Non c'è nessun altro endpoint, nemmeno `/docs` o `/openapi.json`.
+- `/kindle.png` risponde solo con il token del Kindle. Lo stesso vale per `POST /press`, che spunta i task dai [pulsanti del Kindle](#pulsanti-del-kindle) ed esiste solo con `buttons:` attivo. `/healthz` non è autenticato e restituisce solo `ok`. Non c'è nessun altro endpoint, nemmeno `/docs` o `/openapi.json`.
 - **Il servizio NON va aggiunto alla configurazione di cloudflared** né esposto fuori dalla LAN in altro modo.
 
 Struttura del repo:
@@ -99,7 +100,7 @@ I token di HA danno tutti i permessi dell'utente: per questo l'utente è dedicat
 Cosa può fare questo token, verificato su HA 2026.6.0:
 - **può** leggere la configurazione di **tutte** le plance, anche quelle con "Solo amministratori": `require_admin` nasconde la plancia solo dalla barra laterale, non la protegge da `lovelace/config`;
 - **non può** modificare le plance: `lovelace/config/save` risponde `unauthorized`;
-- come ogni utente HA, anche non admin, può chiamare servizi. Il gateway però non lo fa mai: invia solo i comandi di lettura elencati sopra, e il codice rifiuta gli altri prima che partano.
+- come ogni utente HA, anche non admin, può chiamare servizi e modificare i task. Il gateway però non lo fa mai: invia solo i comandi di lettura elencati sopra e, se attivi i pulsanti, `home_tasks/update_task` nella sola forma "segna completato". Il codice rifiuta tutto il resto prima che parta.
 
 ### 2. Repo dei secret (sul PC)
 
@@ -136,6 +137,7 @@ git add -A && git commit -m "Secrets kindle-panel"
 **`gateway/config.yaml`:** va usata una sola tra `dashboard` e `rows`.
 - `dashboard`: l'URL path della plancia, cioè quello che compare nell'indirizzo del browser dopo l'host (`http://<ha>:8123/dashboard-kindle` → `dashboard-kindle`). Lettere, cifre, `-` e `_`, come nella finestra di creazione delle plance di HA;
 - `language`: `it` (default) o `en`. Vale per i testi della card Home Tasks;
+- `buttons` (facoltativo, solo con `dashboard`): `true` per spuntare i task con i [pulsanti del Kindle](#pulsanti-del-kindle), oppure l'elenco dei tasti da usare, nell'ordine in cui vanno assegnati. Senza questa chiave il gateway resta in sola lettura;
 - `rows` (alternativa a `dashboard`): le entità da mostrare, nell'ordine in cui appaiono sullo schermo. Per la prima prova `sun.sun` va bene perché esiste in ogni installazione. `title` è il titolo in cima;
 - `ha_url`:
   - HA con `network_mode: host`: `http://<IP_SERVER>:8123`;
@@ -250,9 +252,41 @@ Se dopo il punto 2 non succede nulla e il Kindle resta usabile, il dashboard si 
 
 Il dashboard ferma il framework Amazon. Finché è attivo, quindi, **non funzionano né la modalità USB né KOReader**.
 
+- **Accensione + Indietro:** premi il tasto di accensione per svegliare il Kindle, poi **Indietro** (Back). Il dashboard si chiude e riparte l'interfaccia Amazon, senza riavvio (vedi [Pulsanti del Kindle](#pulsanti-del-kindle)).
 - **Hard reboot:** tieni premuto il tasto di accensione per circa 20 secondi. Al riavvio il Kindle torna normale.
 - **Via SSH:** `/mnt/us/dashboard/stop.sh` seguito da `reboot`.
 - **Voce KUAL "Ferma dashboard e riavvia":** funziona solo mentre il framework è attivo. Dopo un avvio normale il framework è fermo e KUAL non è raggiungibile.
+
+### Pulsanti del Kindle
+
+Con il dashboard attivo il Kindle legge i suoi tasti:
+- **Indietro (Back):** chiude il dashboard, rimette screensaver e governor della CPU com'erano e riavvia l'interfaccia Amazon. Funziona sempre, anche con la schermata "sleeping";
+- **gli altri 12 tasti** spuntano i task, se `buttons:` è attivo nel `config.yaml` del gateway. Accanto alla casella dei primi task aperti visibili compare il simbolo del tasto che li spunta, nell'ordine di `buttons`.
+
+Il tasto di accensione non si può leggere come gli altri: serve solo a svegliare il Kindle. Quindi:
+1. premi **accensione**: il Kindle si sveglia, si ricollega al Wi-Fi e aggiorna l'immagine;
+2. premi il tasto mostrato accanto al task, anche subito: la pressione resta in coda finché il Wi-Fi è pronto;
+3. il gateway spunta il task e risponde con l'immagine nuova, che il Kindle disegna. I simboli ora indicano i nuovi primi task aperti.
+
+Dopo il risveglio dal tasto di accensione, e dopo ogni pressione, il Kindle resta sveglio per `BUTTON_WINDOW_SECONDS` secondi (30 di default, in `local/env.sh`), poi torna a dormire. Nei normali risvegli programmati legge i tasti solo nei 10 secondi prima di sospendersi.
+
+| `buttons` | Tasto | Simbolo |
+|---|---|---|
+| `right_next` / `right_prev` | Pagina avanti / indietro, lato destro | Kindle con il tasto destro segnato (lungo in basso / corto in alto) |
+| `left_next` / `left_prev` | Pagina avanti / indietro, lato sinistro | Kindle con il tasto sinistro segnato |
+| `up` / `down` / `left` / `right` | Controller a 5 vie | Freccia |
+| `select` | Tasto centrale del controller | Cerchio con punto |
+| `menu` / `home` / `keyboard` | Menu / Home / Tastiera | Tre linee / casa / tastiera |
+
+`buttons: true` li usa tutti in quest'ordine. Un elenco ne sceglie alcuni o cambia l'ordine, per esempio `buttons: [right_next, left_next, select]`.
+
+Regole:
+- il tasto va al task **disegnato accanto al suo simbolo nell'ultima immagine servita**, non a una posizione. Se più tasti partono nella stessa richiesta, valgono tutti per quell'immagine;
+- solo i task aperti e visibili hanno un tasto. Quelli completati, quelli oltre il bordo (`+N`) e le liste esterne no;
+- un tasto viene solo spuntato: per riaprire un task usa HA. Non cancella mai il task, nemmeno con l'opzione `auto_delete_completed` della card;
+- tasti premuti mentre arriva un'immagine nuova vengono ignorati (nel log `Ignoring keys pressed during the refresh`): miravano a quella vecchia, i cui task possono essere passati ad altri tasti;
+- dopo un riavvio il gateway non sa cosa mostra il Kindle. La prima pressione aggiorna solo l'immagine e non spunta niente;
+- `KINDLE_BUTTONS=false` in `local/env.sh` lascia attivo solo Indietro.
 
 ### Cambiare plancia o entità
 
@@ -355,6 +389,12 @@ kindle/src/local/{ca.pem,token,device.sh}
 | `Fetch failed, xh returned N` + `... returned 1` | Download fallito, resta l'immagine precedente. `N`: 1 = connessione/TLS/DNS, 2 = timeout, 4 = HTTP 4xx (401: token errato), 5 = HTTP 5xx (503: il gateway non raggiunge HA) |
 | `Missing configuration: ...` | Mancano `GATEWAY_URL`, `local/token` o `local/ca.pem` |
 | `Couldn't connect to Wi-Fi` / `No test ip specified` | Il ping verso `WIFI_TEST_IP` fallisce, oppure `WIFI_TEST_IP` è vuoto |
+| `Key 191: right_next` | Tasto premuto e riconosciuto |
+| `Key N: not a dashboard key` | Codice non associato a nessun tasto: se è uno dei 13 tasti, il codice del tuo Kindle è diverso da quello in `buttons.sh` |
+| `Keys pressed: ...` | Tasti inviati al gateway con la richiesta dell'immagine |
+| `Woken up by the power button` | Risveglio prima dell'allarme RTC: finestra lunga per i tasti |
+| `Ignoring keys: ...` | Tasti scartati: dashboard non a schermo, `KINDLE_BUTTONS=false`, aggiornamento fallito o immagine cambiata nel frattempo |
+| `Closing the dashboard, starting the Kindle framework` | Premuto Indietro |
 
 Errori di `xh` da riconoscere:
 
@@ -379,6 +419,9 @@ Errori di `xh` da riconoscere:
 | `Home Assistant WebSocket unavailable: HA rejected the token` | Token di HA errato o revocato |
 | `Home Assistant WebSocket unavailable: ...` (altro) | HA non raggiungibile da `ha_url` |
 | `Skipping unsupported cards: ...` | Card presenti nella plancia ma non disegnate (informativo) |
+| `Checked off '...' from the Kindle` | Task spuntato da un tasto del Kindle |
+| `Button ... pressed, but it had no task on the screen` | Tasto senza task nell'ultima immagine (o gateway appena riavviato): solo aggiornamento |
+| `Home Tasks did not check off '...'` | HA ha rifiutato la spunta (task cancellato nel frattempo?): l'immagine nuova mostra lo stato reale |
 | `Unsupported upgrade request` / `No supported WebSocket library detected` | Qualcuno ha provato ad aprire un WebSocket sul gateway: viene rifiutato apposta (`--ws none`). Il secondo messaggio di uvicorn è fuorviante: la libreria c'è, ma serve solo verso HA |
 
 ### Orologio
@@ -404,6 +447,10 @@ Via SSH: `DEBUG=true /mnt/us/dashboard/start.sh`. Gira in primo piano con `set -
 - [ ] Sospensione e risveglio RTC funzionano.
 - [ ] Livello batteria registrato per 24 ore.
 - [ ] L'ora del Kindle è corretta (`date` nel log).
+- [ ] Pulsanti: dopo **accensione** il log riporta `Woken up by the power button`. Ogni tasto premuto compare come `Key <codice>: <nome>`, e il nome corrisponde al tasto fisico. I codici vengono da KOReader e non sono ancora verificati su questo Kindle.
+- [ ] Il simbolo dei tasti pagina corrisponde alla posizione reale: tasto corto in alto = indietro, lungo in basso = avanti.
+- [ ] Accensione + tasto spunta il task indicato, e l'immagine nuova arriva entro pochi secondi.
+- [ ] Accensione + Indietro riporta all'interfaccia Amazon senza riavvio, e da lì USB e KUAL funzionano.
 
 ---
 
@@ -445,7 +492,7 @@ Differenze volute:
 
 ### Security e consumi
 
-- **Comandi verso HA:** sul WebSocket partono solo `auth` e i comandi di `ALLOWED_COMMANDS` in `app/ha_ws.py`, tutti di lettura. Ogni altro comando viene rifiutato dal codice prima di essere inviato.
+- **Comandi verso HA:** sul WebSocket partono solo `auth` e i comandi di `ALLOWED_COMMANDS` in `app/ha_ws.py`. Sono tutti di lettura tranne `home_tasks/update_task`, accettato solo con esattamente `list_id`, `task_id` e `completed: true`: titolo, note, riapertura e ogni altro campo vengono rifiutati, come ogni altro comando, prima di essere inviati. La scrittura parte solo da `POST /press`, con `buttons:` attivo, per id di task letti da HA e disegnati nell'ultima immagine. `GET /kindle.png` non scrive mai.
 - **Token di HA:**
   - non passa mai da un proxy preso dall'ambiente;
   - non segue redirect. La libreria `websockets` li seguirebbe anche verso altri host, e il token viaggia nel primo messaggio dopo l'handshake.

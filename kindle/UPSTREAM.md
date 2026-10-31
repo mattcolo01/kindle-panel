@@ -72,4 +72,16 @@ Gli altri codici d'uscita sono 1 per errori di connessione o TLS e 2 per il time
    - `dist` copia anche `src/local/ca.pem`, `src/local/token` e `src/local/device.sh` se presenti, perché sono git-ignored;
    - nuovo target `lint` (`shellcheck -s ash` + `shfmt -i 2 -d`, come nella CI upstream).
 
-   Il resto è invariato: `wait-for-wifi.sh`, `start.sh`, `stop.sh`, `low-battery.sh`, il log della batteria e `sleeping.png`.
+7. **Pulsanti del Kindle** (vedi il README, *Pulsanti del Kindle*):
+   - **`src/buttons.sh`** (nuovo): un `dd` per ogni `/dev/input/event*` tiene aperto il device e copia i record `input_event` da 16 byte in una pipe, così nessun evento va perso tra due pressioni. Ogni record viene decodificato con `od -d`, che c'è in ogni busybox, e conta solo la pressione (`EV_KEY` con valore 1). I codici dei tasti del K4 NT vengono da KOReader (`event_map_kindle4.lua`). Back crea `/tmp/kindle-dash/exit`, gli altri tasti accodano il loro nome in `/tmp/kindle-dash/presses`, su tmpfs;
+   - **`src/dash.sh`**:
+     - avvia `buttons.sh` dopo `framework stop`, così il framework non vede i tasti;
+     - salva il governor della CPU;
+     - al posto del `sleep 10` prima della sospensione c'è `awake_window`, che legge i tasti: Indietro chiama `exit_dashboard` (ripristina governor e screensaver, `framework start`, esce), gli altri passano a `refresh_dashboard`;
+     - `rtc_sleep` riconosce il risveglio dal tasto di accensione, cioè prima dell'allarme RTC, come fa il fork [kindle-calendar](https://gitea.biboer.cn/gavin/kindle-calendar) su K4. In quel caso la finestra successiva dura `BUTTON_WINDOW_SECONDS`;
+     - `next-wakeup` viene ricalcolato dopo la finestra, che può durare più di 10 s;
+   - **`src/local/fetch-dashboard.sh`**: gli argomenti dopo il file sono i tasti premuti. Con tasti la richiesta diventa `xh post "$GATEWAY_URL/press" button==<nome> ...`, che risponde con il PNG come la GET. Verificato con xh 0.16.1 (build x86_64 della stessa release);
+   - **`src/stop.sh`**: ferma anche `buttons.sh` e i suoi `dd`;
+   - **`src/local/env.sh`**: `KINDLE_BUTTONS` e `BUTTON_WINDOW_SECONDS`.
+
+   Il resto è invariato: `wait-for-wifi.sh`, `start.sh`, `low-battery.sh`, il log della batteria e `sleeping.png`.

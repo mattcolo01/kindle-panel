@@ -1,8 +1,10 @@
-"""Read-only Home Assistant WebSocket client.
+"""Home Assistant WebSocket client: reads, plus checking off a task.
 
 The dashboard configuration (lovelace/config) and the Home Tasks lists are
 exposed only over the WebSocket API, not over REST. This client sends the
-auth message and the commands in ALLOWED_COMMANDS, nothing else.
+auth message and the commands in ALLOWED_COMMANDS, nothing else. The one
+write, home_tasks/update_task, is accepted only as "mark this task
+completed" (COMPLETE_TASK_FIELDS): no other field of a task can be changed.
 """
 
 import json
@@ -17,9 +19,13 @@ from .ha import HAUnavailable
 
 log = logging.getLogger(__name__)
 
-# Only reads: any other command (call_service, lovelace/config/save, ...) is
-# refused before it reaches the socket.
-ALLOWED_COMMANDS = frozenset({"lovelace/config", "home_tasks/get_lists", "home_tasks/get_tasks"})
+# Reads, and completing a task: any other command (call_service,
+# lovelace/config/save, home_tasks/delete_task, ...) is refused before it
+# reaches the socket.
+READ_COMMANDS = frozenset({"lovelace/config", "home_tasks/get_lists", "home_tasks/get_tasks"})
+COMPLETE_TASK = "home_tasks/update_task"
+COMPLETE_TASK_FIELDS = frozenset({"list_id", "task_id", "completed"})
+ALLOWED_COMMANDS = READ_COMMANDS | {COMPLETE_TASK}
 
 TIMEOUT_SECONDS = 10.0
 # A Home Tasks list carries the notes and the history of every task: leave
@@ -84,6 +90,8 @@ class HAWebSocket:
         """Send one command and return its result."""
         if command not in ALLOWED_COMMANDS:
             raise ValueError(f"Command not allowed: {command}")
+        if command == COMPLETE_TASK and (set(fields) != COMPLETE_TASK_FIELDS or fields["completed"] is not True):
+            raise ValueError(f"{command} may only mark a task completed")
         message_id = self._next_id
         self._next_id += 1
         await self._connection.send(json.dumps({**fields, "id": message_id, "type": command}))

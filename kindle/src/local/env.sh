@@ -28,6 +28,15 @@ export GATEWAY_ARP_PARALLELISM=${GATEWAY_ARP_PARALLELISM:-16}
 export REFRESH_SCHEDULE=${REFRESH_SCHEDULE:-"*/15 7-23 * * *"}
 export TIMEZONE=${TIMEZONE:-"Europe/Rome"}
 
+# Kindle keys. Back always closes the dashboard and starts the Kindle UI
+# again (no reboot). With KINDLE_BUTTONS=true the other keys check off the
+# task drawn next to their symbol: this needs "buttons:" in the gateway
+# config.yaml. Press power first to wake the Kindle, then the key.
+export KINDLE_BUTTONS=${KINDLE_BUTTONS:-true}
+# Seconds the Kindle stays awake for keys after the power button wakes it,
+# and after each key press
+export BUTTON_WINDOW_SECONDS=${BUTTON_WINDOW_SECONDS:-30}
+
 # By default, partial screen updates are used to update the screen,
 # to prevent the screen from flashing. After a few partial updates,
 # the screen will start to look a bit distorted (due to e-ink ghosting).

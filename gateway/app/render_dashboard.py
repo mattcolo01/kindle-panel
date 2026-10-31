@@ -3,6 +3,10 @@
 Blocks are laid out top to bottom. When the screen is full the rest is left
 out and the last line says how many tasks are missing ("+N"). As for the
 rows view, the output depends only on the view, never on the time of render.
+
+With Kindle buttons configured, every task row gets a column on the left
+for a key symbol, and the first open tasks that reach the screen get the
+buttons, in order. The render says which task each button got.
 """
 
 import io
@@ -11,6 +15,7 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .buttons import TaskRef
 from .dashboard import DashboardView, Heading
 from .home_tasks import Badge, GroupHeader, TaskColumn, TaskRow
 from .render import BLACK, FONT_BOLD, FONT_REGULAR, HEIGHT, MARGIN, WHITE, WIDTH, fit_text
@@ -27,6 +32,16 @@ LINE_GAP = 4
 BADGE_GAP = 6
 BADGE_PAD_X = 9
 OVERFLOW_HEIGHT = 32
+KEY_WIDTH = 32  # key symbol, as tall as the checkbox
+KEY_GAP = 8
+PAGE_KEYS = {"left_prev": ("left", "prev"), "left_next": ("left", "next"),
+             "right_prev": ("right", "prev"), "right_next": ("right", "next")}
+
+
+@dataclass(frozen=True)
+class Rendered:
+    png: bytes
+    presses: dict[str, TaskRef]  # button -> the task drawn next to its symbol
 
 
 @dataclass(frozen=True)
@@ -89,12 +104,16 @@ def wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, wid
 
 
 class Canvas:
-    def __init__(self, fonts: Fonts) -> None:
+    def __init__(self, fonts: Fonts, keys: bool = False) -> None:
         self.fonts = fonts
         self.image = Image.new("L", (WIDTH, HEIGHT), WHITE)
         self.draw = ImageDraw.Draw(self.image)
         self.left = MARGIN
         self.width = WIDTH - 2 * MARGIN
+        # The key column is there for every task, with or without a key, so
+        # the layout never depends on which tasks got one.
+        self.key_column = KEY_WIDTH + KEY_GAP if keys else 0
+        self.task_indent = self.key_column + TASK_INDENT
 
     # --- badges --------------------------------------------------------
 
@@ -108,7 +127,7 @@ class Canvas:
             width += height - 6 + (6 if badge.text else 0)
             if not badge.text:
                 width = height
-        return min(width, self.width - TASK_INDENT), height
+        return min(width, self.width - self.task_indent), height
 
     def badge_font(self, badge: Badge) -> ImageFont.FreeTypeFont:
         return self.fonts.badge if badge.style == "plain" else self.fonts.badge_bold
@@ -152,6 +171,47 @@ class Canvas:
             cx, cy = x + size / 2, y + size / 2
             self.draw.line([(cx, cy), (cx, y + size * 0.22)], fill=ink, width=2)
             self.draw.line([(cx, cy), (x + size * 0.75, cy)], fill=ink, width=2)
+
+    def draw_key(self, name: str, x: int, y: int) -> None:
+        """A black key cap with a white sketch of the button: a mini Kindle
+        with the page key marked, an arrow or dot of the 5-way, the home,
+        menu and keyboard keys. Drawn, not taken from a font."""
+        draw = self.draw
+        draw.rounded_rectangle([x, y, x + KEY_WIDTH, y + CHECKBOX], radius=6, fill=BLACK)
+        cx, cy = x + KEY_WIDTH / 2, y + CHECKBOX / 2
+        if name in PAGE_KEYS:
+            side, which = PAGE_KEYS[name]
+            draw.rectangle([cx - 5, cy - 10, cx + 5, cy + 10], outline=WHITE, width=2)
+            bar_x = cx - 12 if side == "left" else cx + 9
+            # Previous page: the short key on top; next page: the long one below
+            top, bottom = (cy - 10, cy - 4) if which == "prev" else (cy - 1, cy + 10)
+            draw.rectangle([bar_x, top, bar_x + 3, bottom], fill=WHITE)
+        elif name in ("up", "down", "left", "right"):
+            a, b = 7, 5  # tip distance, half base
+            points = {
+                "up": [(cx, cy - a), (cx + a, cy + b), (cx - a, cy + b)],
+                "down": [(cx, cy + a), (cx + a, cy - b), (cx - a, cy - b)],
+                "left": [(cx - a, cy), (cx + b, cy - a), (cx + b, cy + a)],
+                "right": [(cx + a, cy), (cx - b, cy - a), (cx - b, cy + a)],
+            }[name]
+            draw.polygon(points, fill=WHITE)
+        elif name == "select":
+            draw.ellipse([cx - 9, cy - 9, cx + 9, cy + 9], outline=WHITE, width=2)
+            draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=WHITE)
+        elif name == "home":
+            draw.polygon([(cx, cy - 9), (cx + 9, cy - 1), (cx - 9, cy - 1)], fill=WHITE)
+            draw.rectangle([cx - 6, cy - 1, cx + 6, cy + 8], fill=WHITE)
+            draw.rectangle([cx - 2, cy + 3, cx + 2, cy + 8], fill=BLACK)
+        elif name == "menu":
+            for dy in (-6, 0, 6):
+                draw.rectangle([cx - 8, cy + dy - 1, cx + 8, cy + dy + 1], fill=WHITE)
+        elif name == "keyboard":
+            draw.rectangle([cx - 12, cy - 8, cx + 12, cy + 8], outline=WHITE, width=2)
+            for row in (-4, 0):
+                for col in range(4):
+                    kx = cx - 8 + col * 5
+                    draw.rectangle([kx - 1, cy + row - 1, kx + 1, cy + row + 1], fill=WHITE)
+            draw.rectangle([cx - 5, cy + 4, cx + 5, cy + 5], fill=WHITE)
 
     def layout_badges(self, badges: tuple[Badge, ...], width: int) -> list[list[Badge]]:
         rows: list[list[Badge]] = []
@@ -204,7 +264,7 @@ class Canvas:
             self.draw_badge(badge, self.left + int(self.draw.textlength(name, font=font)) + 10, y + 8)
 
     def task_layout(self, task: TaskRow) -> tuple[list[str], list[list[Badge]], int]:
-        text_width = self.width - TASK_INDENT
+        text_width = self.width - self.task_indent
         lines = wrap(self.draw, task.title, self.fonts.task, text_width, MAX_TITLE_LINES)
         badge_rows = self.layout_badges(task.badges, text_width)
         height = 10 + len(lines) * (line_height(self.fonts.task) + LINE_GAP)
@@ -212,19 +272,22 @@ class Canvas:
             height += max(self.badge_size(b)[1] for b in row) + LINE_GAP
         return lines, badge_rows, max(height + 8, CHECKBOX + 20)
 
-    def draw_task(self, task: TaskRow, y: int, separator: bool) -> None:
+    def draw_task(self, task: TaskRow, y: int, separator: bool, key: str | None = None) -> None:
         lines, badge_rows, height = self.task_layout(task)
         if separator:
             self.draw.line([(self.left, y), (self.left + self.width, y)], fill=GRAY_LINE, width=1)
         box_top = y + 10 + (line_height(self.fonts.task) - CHECKBOX) // 2
-        box = [self.left, box_top, self.left + CHECKBOX, box_top + CHECKBOX]
+        if key is not None:
+            self.draw_key(key, self.left, box_top)
+        box_left = self.left + self.key_column
+        box = [box_left, box_top, box_left + CHECKBOX, box_top + CHECKBOX]
         if task.completed:
             self.draw.rounded_rectangle(box, radius=5, fill=GRAY_DONE)
             self.draw.line([(box[0] + 6, box_top + 13), (box[0] + 11, box_top + 19), (box[0] + 20, box_top + 7)],
                            fill=WHITE, width=3)
         else:
             self.draw.rounded_rectangle(box, radius=5, outline=BLACK, width=2)
-        x = self.left + TASK_INDENT
+        x = self.left + self.task_indent
         cursor = y + 10
         ink = GRAY_DONE if task.completed else BLACK
         for line in lines:
@@ -297,9 +360,11 @@ def item_height(canvas: Canvas, item: Item) -> int:
     return canvas.task_layout(item.payload)[2]
 
 
-def render_dashboard(view: DashboardView) -> bytes:
-    canvas = Canvas(load_fonts())
+def render_dashboard(view: DashboardView) -> Rendered:
+    canvas = Canvas(load_fonts(), keys=bool(view.buttons))
     draw = canvas.draw
+    free_buttons = list(view.buttons)
+    presses: dict[str, TaskRef] = {}
 
     # Footer: battery only (tasks have no "data time" like entity rows)
     footer_top = HEIGHT - MARGIN - 45
@@ -336,9 +401,14 @@ def render_dashboard(view: DashboardView) -> bytes:
         elif item.kind == "group":
             canvas.draw_group(item.payload, y)
         else:
-            canvas.draw_task(item.payload, y, item.separator)
+            task = item.payload
+            key = None
+            if free_buttons and not task.completed and task.ref is not None:
+                key = free_buttons.pop(0)
+                presses[key] = task.ref
+            canvas.draw_task(task, y, item.separator, key)
         y += height
 
     buffer = io.BytesIO()
     canvas.image.save(buffer, format="PNG", optimize=True)
-    return buffer.getvalue()
+    return Rendered(buffer.getvalue(), presses)

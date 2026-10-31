@@ -15,6 +15,13 @@ ha_url: "http://homeassistant:8123"      # rete docker o IP LAN
 dashboard: "dashboard-kindle"
 language: "it"                           # it | en: testi della card Home Tasks
 
+# Pulsanti del Kindle (solo con dashboard): accanto ai primi task aperti
+# compare il simbolo di un tasto, che li spunta (accensione + tasto). È
+# l'unica scrittura verso HA: senza questa chiave il gateway legge soltanto.
+# true = tutti, in quest'ordine; oppure un elenco con i tasti e l'ordine voluti.
+# buttons: true
+# buttons: [right_next, right_prev, left_next, left_prev, up, down, left, right, select, menu, home, keyboard]
+
 # In alternativa a "dashboard", un elenco fisso di entità (lista consentita):
 # il gateway legge SOLO queste. Usa una sola delle due chiavi.
 # title: "Casa"

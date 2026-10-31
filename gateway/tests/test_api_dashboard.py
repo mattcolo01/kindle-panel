@@ -128,3 +128,107 @@ def test_ha_unreachable_returns_503(settings, auth):
     settings = dataclasses.replace(settings, ha_url=url, rows=(), dashboard="dashboard-kindle")
     with TestClient(create_app(settings)) as client:
         assert client.get("/kindle.png", headers=auth).status_code == 503
+
+
+# --- Kindle buttons (POST /press) -------------------------------------------
+
+BUTTON_TASKS = [
+    {"id": "a1", "title": "Primo", "completed": False, "sort_order": 0},
+    {"id": "a2", "title": "Fatto", "completed": True, "sort_order": 1},
+    {"id": "a3", "title": "Secondo", "completed": False, "sort_order": 2},
+    {"id": "a4", "title": "Terzo", "completed": False, "sort_order": 3},
+]
+
+
+@pytest.fixture
+def buttons_client(dashboard_settings, ha, rest):
+    ha.tasks[LIST_ID]["tasks"] = [dict(t) for t in BUTTON_TASKS]
+    settings = dataclasses.replace(dashboard_settings, buttons=("right_next", "up", "select"))
+    with TestClient(create_app(settings)) as c:
+        yield c
+
+
+def completed(ha) -> dict[str, bool]:
+    return {t["id"]: t["completed"] for t in ha.tasks[LIST_ID]["tasks"]}
+
+
+def test_press_checks_off_the_task_shown_next_to_the_button(buttons_client, ha, auth):
+    shown = buttons_client.get("/kindle.png", headers=auth).content
+    response = buttons_client.post("/press?button=up", headers={**auth, "X-Kindle-Battery": "80"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content != shown
+    assert completed(ha) == {"a1": False, "a2": True, "a3": True, "a4": False}
+    # The check-off comes first, then the reads of the new image
+    last_connection = ha.received[len(ha.received) - ha.received[::-1].index(ha.received[0]):]
+    assert last_connection[0] == {"id": 1, "type": "home_tasks/update_task", "list_id": LIST_ID,
+                                  "task_id": "a3", "completed": True}
+    assert [m["type"] for m in last_connection[1:]] == [
+        "lovelace/config", "home_tasks/get_lists", "home_tasks/get_tasks"]
+
+
+def test_buttons_pressed_together_refer_to_the_same_image(buttons_client, ha, auth):
+    """After the first check-off the buttons move up: the second button must
+    still complete the task it showed when it was pressed."""
+    buttons_client.get("/kindle.png", headers=auth)
+    # A button pressed many times counts once (more presses than buttons is fine)
+    response = buttons_client.post("/press?button=right_next&button=up&button=up&button=up&button=up", headers=auth)
+    assert response.status_code == 200
+    assert completed(ha) == {"a1": True, "a2": True, "a3": True, "a4": False}
+    assert ha.commands.count("home_tasks/update_task") == 2
+
+
+def test_the_new_image_gives_the_buttons_new_tasks(buttons_client, ha, auth):
+    buttons_client.get("/kindle.png", headers=auth)
+    buttons_client.post("/press?button=right_next", headers=auth)  # a1 done: a3 gets right_next
+    buttons_client.post("/press?button=right_next", headers=auth)
+    assert completed(ha) == {"a1": True, "a2": True, "a3": True, "a4": False}
+
+
+def test_button_without_a_task_only_redraws(buttons_client, ha, auth, caplog):
+    ha.tasks[LIST_ID]["tasks"] = [dict(t) for t in BUTTON_TASKS[:2]]  # one open task: select has none
+    buttons_client.get("/kindle.png", headers=auth)
+    response = buttons_client.post("/press?button=select", headers=auth)
+    assert response.status_code == 200
+    assert "home_tasks/update_task" not in ha.commands
+    assert "no task on the screen" in caplog.text
+
+
+def test_press_before_any_image_completes_nothing(buttons_client, ha, auth):
+    """After a gateway restart the buttons are unknown: just send the image."""
+    response = buttons_client.post("/press?button=up", headers=auth)
+    assert response.status_code == 200
+    assert "home_tasks/update_task" not in ha.commands
+    assert completed(ha) == {t["id"]: t["completed"] for t in BUTTON_TASKS}
+
+
+def test_task_gone_meanwhile_still_answers_with_the_image(buttons_client, ha, auth, caplog):
+    buttons_client.get("/kindle.png", headers=auth)
+    del ha.tasks[LIST_ID]["tasks"][2]  # a3, the task of "up"
+    response = buttons_client.post("/press?button=up", headers=auth)
+    assert response.status_code == 200
+    assert "did not check off" in caplog.text
+
+
+@pytest.mark.parametrize("query", ["", "?button=", "?button=back", "?button=down", "?button=up&button=nope"])
+def test_invalid_presses_are_refused_before_ha(buttons_client, ha, auth, query):
+    assert buttons_client.post(f"/press{query}", headers=auth).status_code == 422
+    assert ha.connections == 0
+
+
+def test_press_needs_the_kindle_token(buttons_client, ha):
+    response = buttons_client.post("/press?button=up", headers={"Authorization": "Bearer wrong"})
+    assert response.status_code == 401
+    assert ha.connections == 0
+
+
+def test_press_without_buttons_configured_is_not_found(client, ha, auth):
+    client.get("/kindle.png", headers=auth)
+    assert client.post("/press?button=up", headers=auth).status_code == 404
+    assert "home_tasks/update_task" not in ha.commands
+
+
+def test_get_never_writes(buttons_client, ha, auth):
+    for _ in range(3):
+        buttons_client.get("/kindle.png", headers=auth)
+    assert "home_tasks/update_task" not in ha.commands

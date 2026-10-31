@@ -130,3 +130,44 @@ def test_dashboard_url_paths_accepted_by_ha(tmp_path, url_path):
     config = tmp_path / "config.yaml"
     config.write_text(f"timezone: Europe/Rome\nha_url: http://h\ndashboard: {url_path}")
     assert load_settings(env_for(config)).dashboard == url_path
+
+
+def config_with(tmp_path, extra: str, mode: str = 'dashboard: "dashboard-kindle"'):
+    config = tmp_path / "config.yaml"
+    config.write_text(f'timezone: "Europe/Rome"\nha_url: "http://ha:8123"\n{mode}\n{extra}\n')
+    return load_settings(env_for(config))
+
+
+def test_example_buttons_lines_load(tmp_path):
+    """Both commented buttons lines of the example are valid once uncommented."""
+    from app.buttons import BUTTONS
+    lines = [line[2:] for line in EXAMPLE_CONFIG.read_text().splitlines() if line.startswith("# buttons:")]
+    assert len(lines) == 2
+    assert config_with(tmp_path, lines[0]).buttons == BUTTONS
+    assert config_with(tmp_path, lines[1]).buttons == BUTTONS
+
+
+def test_buttons_default_off(tmp_path):
+    assert config_with(tmp_path, "").buttons == ()
+    assert config_with(tmp_path, "buttons: false").buttons == ()
+
+
+def test_buttons_true_is_every_button(tmp_path):
+    from app.buttons import BUTTONS
+    assert config_with(tmp_path, "buttons: true").buttons == BUTTONS
+    assert "back" not in BUTTONS
+
+
+def test_buttons_list_keeps_its_order(tmp_path):
+    assert config_with(tmp_path, "buttons: [select, up, right_next]").buttons == ("select", "up", "right_next")
+
+
+@pytest.mark.parametrize("value", ["[]", "[back]", "[up, up]", "up", "1", "[power]"])
+def test_invalid_buttons(tmp_path, value):
+    with pytest.raises(ConfigError):
+        config_with(tmp_path, f"buttons: {value}")
+
+
+def test_buttons_need_dashboard_mode(tmp_path):
+    with pytest.raises(ConfigError):
+        config_with(tmp_path, "buttons: true", mode="rows:\n  - entity: sun.sun")

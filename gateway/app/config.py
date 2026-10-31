@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from .buttons import BUTTONS
 from .i18n import LANGUAGES
 
 DEFAULT_CONFIG_FILE = "/config/config.yaml"
@@ -46,6 +47,7 @@ class Settings:
     language: str = DEFAULT_LANGUAGE
     ha_mac: str | None = None
     ha_arp_interface: str | None = None
+    buttons: tuple[str, ...] = ()  # Kindle buttons that check off tasks; empty = read only
 
 
 def read_secret(name: str, env: dict[str, str]) -> str:
@@ -80,6 +82,22 @@ def parse_rows(raw_rows: object) -> tuple[Row, ...]:
             raise ConfigError(f"rows[{i}].label must be a string")
         rows.append(Row(entity=entity, label=label))
     return tuple(rows)
+
+
+def parse_buttons(raw: object) -> tuple[str, ...]:
+    """true: every button, in the default order; a list: these, in this order."""
+    if raw is None or raw is False:
+        return ()
+    if raw is True:
+        return BUTTONS
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError("buttons must be true, false or a non-empty list of button names")
+    for name in raw:
+        if name not in BUTTONS:
+            raise ConfigError(f"Unknown button {name!r}: use {', '.join(BUTTONS)}")
+    if len(set(raw)) != len(raw):
+        raise ConfigError("buttons lists a button twice")
+    return tuple(raw)
 
 
 def parse_config(data: object) -> dict:
@@ -129,6 +147,10 @@ def parse_config(data: object) -> dict:
     if language not in LANGUAGES:
         raise ConfigError(f"language must be one of {', '.join(LANGUAGES)}: {language!r}")
 
+    buttons = parse_buttons(data.get("buttons"))
+    if buttons and dashboard is None:
+        raise ConfigError("buttons check off Home Tasks tasks: they need dashboard, not rows")
+
     return {
         "title": title,
         "timezone": timezone,
@@ -138,6 +160,7 @@ def parse_config(data: object) -> dict:
         "language": language,
         "ha_mac": ha_mac.lower() if ha_mac else None,
         "ha_arp_interface": ha_arp_interface,
+        "buttons": buttons,
     }
 
 

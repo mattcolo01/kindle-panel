@@ -1,7 +1,23 @@
 #!/usr/bin/env sh
 # Fetch a new dashboard image from kindle-gateway, output it to "$1".
+# Further arguments are the names of the keys pressed: then the request is
+# POST /press, which checks off their tasks and answers with the new image.
 # Exit codes: 0 = new image in "$1", 1 = fetch failed, 2 = image unchanged.
 DIR="$(dirname "$0")/.."
+out=$1
+shift
+
+method="get"
+url="$GATEWAY_URL/kindle.png"
+if [ $# -gt 0 ]; then
+  method="post"
+  url="$GATEWAY_URL/press"
+  # Each key name becomes a query item for xh: button==<name>
+  for button in "$@"; do
+    set -- "$@" "button==$button"
+    shift
+  done
+fi
 STATE_DIR="$DIR/local/state"
 LAST_HASH_FILE="$STATE_DIR/last_hash"
 TOKEN_FILE="$DIR/local/token"
@@ -30,7 +46,7 @@ battery=$(gasgauge-info -c 2>/dev/null | tr -d %)
 
 "$DIR/xh" --ignore-stdin --verify="$CA_FILE" -A bearer -a "$KINDLE_TOKEN" \
   --check-status --timeout 20 -d -q -o "$tmp" \
-  get "$GATEWAY_URL/kindle.png" X-Kindle-Battery:"$battery"
+  "$method" "$url" "$@" X-Kindle-Battery:"$battery"
 xh_status=$?
 if [ "$xh_status" -ne 0 ]; then
   # xh: 1 = connection/TLS error, 2 = timeout, 4 = HTTP 4xx, 5 = HTTP 5xx
@@ -48,6 +64,6 @@ if [ -n "$new_hash" ] && [ -f "$LAST_HASH_FILE" ] &&
   exit 2
 fi
 
-mv "$tmp" "$1" || exit 1
+mv "$tmp" "$out" || exit 1
 echo "$new_hash" >"$LAST_HASH_FILE"
 exit 0

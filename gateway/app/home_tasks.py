@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date
 from functools import cmp_to_key
 
+from .buttons import TASK_ID_RE, TaskRef
 from .i18n import MONTHS, translate
 
 MAX_TEXT = 300  # characters kept of any text coming from HA
@@ -44,6 +45,7 @@ class TaskRow:
     title: str
     completed: bool
     badges: tuple[Badge, ...]
+    ref: TaskRef | None = None  # what a Kindle button completes; never drawn
 
 
 @dataclass(frozen=True)
@@ -361,6 +363,7 @@ def column_view(
     names: dict[str, str],
     language: str,
     today: date,
+    list_id: str | None = None,
 ) -> TaskColumn:
     """_buildColumn: header (_buildColumnHeader) and list (_buildColumnTaskList).
     Collapsed sections live in the browser's localStorage: here all are open."""
@@ -373,8 +376,12 @@ def column_view(
         progress = translate(language, "progress", sum(1 for t in tasks if t.get("completed")), len(tasks))
 
     def row(task: dict) -> TaskRow:
-        return TaskRow(text(task.get("title")), bool(task.get("completed")),
-                       task_badges(task, col, names, language, today))
+        title = text(task.get("title"))
+        task_id = task.get("id")
+        ref = None
+        if list_id is not None and isinstance(task_id, str) and TASK_ID_RE.match(task_id):
+            ref = TaskRef(list_id, task_id, title)
+        return TaskRow(title, bool(task.get("completed")), task_badges(task, col, names, language, today), ref)
 
     visible = filtered_tasks(tasks, col, today)
     if not visible:

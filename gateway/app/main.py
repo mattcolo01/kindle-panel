@@ -1,8 +1,12 @@
 """kindle-gateway: serves the dashboard PNG to the Kindle.
 
 Endpoints:
-  GET /kindle.png  Bearer KINDLE_TOKEN required; optional X-Kindle-Battery.
-  GET /healthz     unauthenticated, returns "ok" and nothing else.
+  GET  /kindle.png  Bearer KINDLE_TOKEN required; optional X-Kindle-Battery.
+  POST /press?button=<name>[&button=<name>...]
+                    Bearer KINDLE_TOKEN required; only with buttons configured.
+                    Checks off the tasks those buttons had in the last image
+                    served, then answers like GET /kindle.png.
+  GET  /healthz     unauthenticated, returns "ok" and nothing else.
 
 The image shows either the entities listed in config.yaml (rows) or an HA
 dashboard (dashboard: <url_path>), read over the WebSocket API.
@@ -22,12 +26,13 @@ from starlette.concurrency import run_in_threadpool
 
 from .config import Settings, load_settings
 from .arp import HAEndpointResolver
+from .buttons import TaskRef
 from .dashboard import DashboardError, assigned_persons, fetch_dashboard, person_names
 from .dashboard import build_view as build_dashboard_view
 from .ha import HAClient, HAUnavailable
-from .ha_ws import TIMEOUT_SECONDS, HACommandError, ha_websocket
+from .ha_ws import COMPLETE_TASK, TIMEOUT_SECONDS, HACommandError, ha_websocket
 from .render import build_view, check_fonts, parse_battery, render
-from .render_dashboard import render_dashboard
+from .render_dashboard import Rendered, render_dashboard
 
 log = logging.getLogger(__name__)
 APP_LOGGER = "app"
@@ -51,10 +56,21 @@ def is_authorized(request: Request, token: str) -> bool:
     return hmac.compare_digest(credentials.strip().encode(), token.encode())
 
 
-async def dashboard_png(settings: Settings, ha: HAClient, ha_url: str, battery: int | None) -> bytes:
-    """Render a dashboard, raising the HA error to let the caller recover."""
+async def dashboard_png(
+    settings: Settings, ha: HAClient, ha_url: str, battery: int | None, complete: list[TaskRef]
+) -> Rendered:
+    """Check off the tasks in complete, then render the dashboard. HA errors
+    are raised to let the caller recover; completing a task twice is harmless
+    (Home Tasks acts only on the open -> completed transition)."""
     async with asyncio.timeout(TIMEOUT_SECONDS):
         async with ha_websocket(ha_url, settings.ha_token) as ws:
+            for ref in complete:
+                try:
+                    await ws.command(COMPLETE_TASK, list_id=ref.list_id, task_id=ref.task_id, completed=True)
+                    log.info("Checked off %r from the Kindle", ref.title)
+                except HACommandError as e:
+                    # Deleted in the meantime, say: the new image will show it
+                    log.warning("Home Tasks did not check off %r: %s %s", ref.title, e.code, e.message)
             data = await fetch_dashboard(ws, settings.dashboard)
 
     persons = assigned_persons(data)
@@ -64,8 +80,55 @@ async def dashboard_png(settings: Settings, ha: HAClient, ha_url: str, battery: 
             names = person_names(await ha.get_states(persons))
         except HAUnavailable:
             log.warning("Could not read the names of assigned persons")
-    view = build_dashboard_view(data, names, settings.language, datetime.now(settings.timezone).date(), battery)
+    view = build_dashboard_view(data, names, settings.language, datetime.now(settings.timezone).date(), battery,
+                                settings.buttons)
     return await run_in_threadpool(render_dashboard, view)
+
+
+def png_response(png: bytes) -> Response:
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+async def serve_dashboard(request: Request, settings: Settings, complete: list[TaskRef]) -> Response:
+    battery = parse_battery(request.headers.get("x-kindle-battery"))
+    state = request.app.state
+    try:
+        rendered = await dashboard_png(settings, state.ha, state.ha_resolver.url, battery, complete)
+    except HACommandError as e:
+        if e.command == "lovelace/config" and e.code == "config_not_found":
+            log.error("Dashboard %r not found, or never edited (auto-generated): %s", settings.dashboard, e.message)
+        else:
+            log.error("Home Assistant refused %s: %s %s", e.command, e.code, e.message)
+        return Response(status_code=503)
+    except DashboardError as e:
+        log.error("Dashboard %r cannot be drawn: %s", settings.dashboard, e)
+        return Response(status_code=503)
+    except (HAUnavailable, TimeoutError) as e:
+        if not await recover_ha(request, settings):
+            log.error("Home Assistant WebSocket unavailable: %s", str(e) or type(e).__name__)
+            return Response(status_code=503)
+        try:
+            rendered = await dashboard_png(settings, state.ha, state.ha_resolver.url, battery, complete)
+        except (HACommandError, DashboardError, HAUnavailable, TimeoutError) as retry_error:
+            log.error("Home Assistant is still unavailable after ARP recovery: %s", retry_error)
+            return Response(status_code=503)
+    # The Kindle shows the image it fetched last: its buttons are these
+    state.presses = rendered.presses
+    return png_response(rendered.png)
+
+
+def pressed_tasks(request: Request, names: list[str]) -> list[TaskRef]:
+    """The tasks of the buttons pressed, in the last image served. Several
+    buttons pressed together all refer to that image, not to the one
+    redrawn after the first."""
+    refs: list[TaskRef] = []
+    for name in names:
+        ref = request.app.state.presses.get(name)
+        if ref is None:
+            log.info("Button %s pressed, but it had no task on the screen", name)
+        elif ref not in refs:
+            refs.append(ref)
+    return refs
 
 
 async def recover_ha(request: Request, settings: Settings) -> bool:
@@ -89,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.ha = HAClient(settings.ha_url, settings.ha_token)
         app.state.ha_resolver = HAEndpointResolver(settings.ha_url, settings.ha_mac, settings.ha_arp_interface)
+        app.state.presses = {}
         try:
             yield
         finally:
@@ -105,29 +169,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not is_authorized(request, settings.kindle_token):
             return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
 
-        battery = parse_battery(request.headers.get("x-kindle-battery"))
         if settings.dashboard is not None:
-            try:
-                png = await dashboard_png(settings, request.app.state.ha, request.app.state.ha_resolver.url, battery)
-            except HACommandError as e:
-                if e.command == "lovelace/config" and e.code == "config_not_found":
-                    log.error("Dashboard %r not found, or never edited (auto-generated): %s", settings.dashboard, e.message)
-                else:
-                    log.error("Home Assistant refused %s: %s %s", e.command, e.code, e.message)
-                return Response(status_code=503)
-            except DashboardError as e:
-                log.error("Dashboard %r cannot be drawn: %s", settings.dashboard, e)
-                return Response(status_code=503)
-            except (HAUnavailable, TimeoutError) as e:
-                if not await recover_ha(request, settings):
-                    log.error("Home Assistant WebSocket unavailable: %s", str(e) or type(e).__name__)
-                    return Response(status_code=503)
-                try:
-                    png = await dashboard_png(settings, request.app.state.ha, request.app.state.ha_resolver.url, battery)
-                except (HACommandError, DashboardError, HAUnavailable, TimeoutError) as retry_error:
-                    log.error("Home Assistant is still unavailable after ARP recovery: %s", retry_error)
-                    return Response(status_code=503)
-            return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+            return await serve_dashboard(request, settings, [])
+
+        battery = parse_battery(request.headers.get("x-kindle-battery"))
 
         try:
             states = await request.app.state.ha.get_states(row.entity for row in settings.rows)
@@ -149,6 +194,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             battery,
         )
         png = await run_in_threadpool(render, view)
-        return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+        return png_response(png)
+
+    @app.post("/press")
+    async def press(request: Request) -> Response:
+        if not is_authorized(request, settings.kindle_token):
+            return Response(status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        if not settings.buttons:
+            return Response(status_code=404)
+        names = list(dict.fromkeys(request.query_params.getlist("button")))
+        if not names or any(name not in settings.buttons for name in names):
+            return Response(status_code=422)
+        return await serve_dashboard(request, settings, pressed_tasks(request, names))
 
     return app
