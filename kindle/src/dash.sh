@@ -57,7 +57,12 @@ prepare_sleep() {
 
 refresh_dashboard() {
   echo "Refreshing dashboard"
-  "$DIR/wait-for-wifi.sh" "$WIFI_TEST_IP"
+  # Revalidate the MAC before every fetch. setup-hosts only remounts / when
+  # the mapping changed, so normal refreshes do not write the system rootfs.
+  "$DIR/setup-hosts.sh" || return 1
+  gateway_ip=$WIFI_TEST_IP
+  [ -f "$DIR/local/state/gateway_ip" ] && gateway_ip=$(cat "$DIR/local/state/gateway_ip")
+  "$DIR/wait-for-wifi.sh" "$gateway_ip"
 
   "$FETCH_DASHBOARD_CMD" "$DASH_PNG"
   fetch_status=$?

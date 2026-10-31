@@ -5,9 +5,10 @@
 # Plain shell only: the K4 busybox is too old for options like grep -x.
 HOSTS=/etc/hosts
 TMP_HOSTS=/var/tmp/hosts.new
+DIR="$(dirname "$0")"
 
 host=$(echo "$GATEWAY_URL" | sed -n 's#^https*://\([^:/]*\).*#\1#p')
-ip=$WIFI_TEST_IP
+ip=$("$DIR/discover-gateway.sh")
 
 fail() {
   echo "setup-hosts: $1"

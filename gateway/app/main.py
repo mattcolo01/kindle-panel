@@ -21,6 +21,7 @@ from fastapi.responses import PlainTextResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .config import Settings, load_settings
+from .arp import HAEndpointResolver
 from .dashboard import DashboardError, assigned_persons, fetch_dashboard, person_names
 from .dashboard import build_view as build_dashboard_view
 from .ha import HAClient, HAUnavailable
@@ -50,24 +51,11 @@ def is_authorized(request: Request, token: str) -> bool:
     return hmac.compare_digest(credentials.strip().encode(), token.encode())
 
 
-async def dashboard_png(settings: Settings, ha: HAClient, battery: int | None) -> bytes | None:
-    """The dashboard image, or None (logged) when it cannot be drawn."""
-    try:
-        async with asyncio.timeout(TIMEOUT_SECONDS):
-            async with ha_websocket(settings.ha_url, settings.ha_token) as ws:
-                data = await fetch_dashboard(ws, settings.dashboard)
-    except HACommandError as e:
-        if e.command == "lovelace/config" and e.code == "config_not_found":
-            log.error("Dashboard %r not found, or never edited (auto-generated): %s", settings.dashboard, e.message)
-        else:
-            log.error("Home Assistant refused %s: %s %s", e.command, e.code, e.message)
-        return None
-    except DashboardError as e:
-        log.error("Dashboard %r cannot be drawn: %s", settings.dashboard, e)
-        return None
-    except (HAUnavailable, TimeoutError) as e:
-        log.error("Home Assistant WebSocket unavailable: %s", str(e) or type(e).__name__)
-        return None
+async def dashboard_png(settings: Settings, ha: HAClient, ha_url: str, battery: int | None) -> bytes:
+    """Render a dashboard, raising the HA error to let the caller recover."""
+    async with asyncio.timeout(TIMEOUT_SECONDS):
+        async with ha_websocket(ha_url, settings.ha_token) as ws:
+            data = await fetch_dashboard(ws, settings.dashboard)
 
     persons = assigned_persons(data)
     names: dict[str, str] = {}
@@ -80,6 +68,17 @@ async def dashboard_png(settings: Settings, ha: HAClient, battery: int | None) -
     return await run_in_threadpool(render_dashboard, view)
 
 
+async def recover_ha(request: Request, settings: Settings) -> bool:
+    """ARP-rescan HA once after an unavailable error and replace its client."""
+    url = await request.app.state.ha_resolver.recover()
+    if url is None:
+        return False
+    old_ha = request.app.state.ha
+    request.app.state.ha = HAClient(url, settings.ha_token)
+    await old_ha.aclose()
+    return True
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = load_settings()
@@ -89,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.ha = HAClient(settings.ha_url, settings.ha_token)
+        app.state.ha_resolver = HAEndpointResolver(settings.ha_url, settings.ha_mac, settings.ha_arp_interface)
         try:
             yield
         finally:
@@ -107,16 +107,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         battery = parse_battery(request.headers.get("x-kindle-battery"))
         if settings.dashboard is not None:
-            png = await dashboard_png(settings, request.app.state.ha, battery)
-            if png is None:
+            try:
+                png = await dashboard_png(settings, request.app.state.ha, request.app.state.ha_resolver.url, battery)
+            except HACommandError as e:
+                if e.command == "lovelace/config" and e.code == "config_not_found":
+                    log.error("Dashboard %r not found, or never edited (auto-generated): %s", settings.dashboard, e.message)
+                else:
+                    log.error("Home Assistant refused %s: %s %s", e.command, e.code, e.message)
                 return Response(status_code=503)
+            except DashboardError as e:
+                log.error("Dashboard %r cannot be drawn: %s", settings.dashboard, e)
+                return Response(status_code=503)
+            except (HAUnavailable, TimeoutError) as e:
+                if not await recover_ha(request, settings):
+                    log.error("Home Assistant WebSocket unavailable: %s", str(e) or type(e).__name__)
+                    return Response(status_code=503)
+                try:
+                    png = await dashboard_png(settings, request.app.state.ha, request.app.state.ha_resolver.url, battery)
+                except (HACommandError, DashboardError, HAUnavailable, TimeoutError) as retry_error:
+                    log.error("Home Assistant is still unavailable after ARP recovery: %s", retry_error)
+                    return Response(status_code=503)
             return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
         try:
             states = await request.app.state.ha.get_states(row.entity for row in settings.rows)
         except HAUnavailable:
-            log.error("Home Assistant unreachable, answering 503")
-            return Response(status_code=503)
+            if not await recover_ha(request, settings):
+                log.error("Home Assistant unreachable, answering 503")
+                return Response(status_code=503)
+            try:
+                states = await request.app.state.ha.get_states(row.entity for row in settings.rows)
+            except HAUnavailable:
+                log.error("Home Assistant is still unreachable after ARP recovery")
+                return Response(status_code=503)
 
         view = build_view(
             settings.title,

@@ -46,7 +46,7 @@ Il repo contiene solo codice ed esempi. I file del singolo impianto (certificati
 | `gateway/certs/ca.pem`, `ca.key` | CA privata che firma il certificato | dove si generano i certificati (`ca.key` non va mai montata) |
 | `kindle/src/local/ca.pem` | Copia di `gateway/certs/ca.pem` | build del Kindle |
 | `kindle/src/local/token` | Copia di `gateway/secrets/kindle_token` | build del Kindle |
-| `kindle/src/local/device.sh` | `WIFI_TEST_IP` e `GATEWAY_URL` | build del Kindle |
+| `kindle/src/local/device.sh` | `WIFI_TEST_IP`, `GATEWAY_URL` e, facoltativi, MAC/rete ARP del gateway | build del Kindle |
 
 ---
 
@@ -278,6 +278,36 @@ Il Kindle non va toccato: al ciclo successivo scarica la nuova immagine.
    La CA resta la stessa, quindi `ca.pem` sul Kindle non cambia.
 3. Copia il nuovo certificato sul server e riavvia il gateway.
 4. Ricostruisci e ricopia `dist/` sul Kindle. Al prossimo avvio `setup-hosts.sh` sostituisce la vecchia voce in `/etc/hosts`.
+
+### Recuperare automaticamente un IP DHCP con ARP
+
+La soluzione più affidabile resta una prenotazione DHCP. Come recupero automatico opzionale, il progetto può però cercare un dispositivo dal suo MAC quando quello all'IP noto non risponde più o non ha quel MAC. ARP funziona **solo nella stessa LAN/VLAN**: non attraversa router, reti guest o bridge Docker.
+
+**Gateway → Home Assistant.** Se `ha_url` contiene un IP LAN e Home Assistant può cambiare IP, aggiungi al `gateway/config.yaml`:
+
+```yaml
+ha_mac: "00:11:22:33:44:55"       # MAC della NIC LAN di Home Assistant
+ha_arp_interface: "eth0"           # opzionale; interfaccia LAN del server
+```
+
+Il gateway esegue la scansione soltanto dopo un errore di connessione a HA e riprova una volta con l'IP trovato. Per poter emettere ARP, nel `compose.yaml` il servizio deve essere sulla LAN del server:
+
+```yaml
+network_mode: host
+cap_add:
+  - NET_RAW
+```
+
+In questa modalità rimuovi `ports:` e `networks:` dal servizio. Non attivarlo quando HA è già raggiunto tramite una rete Docker: lì il nome del container è più stabile dell'IP e ARP non può funzionare.
+
+**Kindle → gateway.** Nel `kindle/src/local/device.sh` configura entrambi i valori, lasciando comunque `WIFI_TEST_IP` come ultimo IP noto:
+
+```sh
+export GATEWAY_MAC="00:11:22:33:44:55"       # MAC LAN del server gateway
+export GATEWAY_ARP_NETWORK="192.168.1"       # rete /24 da esplorare
+```
+
+All'avvio e prima di ogni fetch il Kindle verifica che l'IP noto appartenga a quel MAC. Se non è così, fa una scansione ARP limitata alla `/24` indicata (massimo 16 probe parallele), salva l'IP trovato in `local/state/gateway_ip` e aggiorna `/etc/hosts`. La scansione consuma rete e batteria, quindi viene usata solo nel caso di errore; per reti diverse da `/24` è preferibile la prenotazione DHCP oppure DNS locale.
 
 ### Ruotare i token
 

@@ -100,6 +100,31 @@ def test_label_defaults_to_entity_id(tmp_path):
     assert settings.ha_url == "http://h"
 
 
+def test_accepts_optional_arp_recovery_settings(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "timezone: Europe/Rome\nha_url: http://h:8123\nrows: [{entity: sensor.a}]\n"
+        "ha_mac: AA:bb:CC:dd:EE:fF\nha_arp_interface: eth0\n"
+    )
+    settings = load_settings(env_for(config))
+    assert settings.ha_mac == "aa:bb:cc:dd:ee:ff"
+    assert settings.ha_arp_interface == "eth0"
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        ("ha_mac: not-a-mac", "ha_mac"),
+        ("ha_arp_interface: eth0", "requires ha_mac"),
+    ],
+)
+def test_rejects_invalid_arp_recovery_settings(tmp_path, extra, message):
+    config = tmp_path / "config.yaml"
+    config.write_text(f"timezone: Europe/Rome\nha_url: http://h\nrows: [{{entity: sensor.a}}]\n{extra}\n")
+    with pytest.raises(ConfigError, match=message):
+        load_settings(env_for(config))
+
+
 @pytest.mark.parametrize("url_path", ["dashboard-kindle", "Dashboard-Kindle", "lovelace", "map", "my_dash-1"])
 def test_dashboard_url_paths_accepted_by_ha(tmp_path, url_path):
     config = tmp_path / "config.yaml"

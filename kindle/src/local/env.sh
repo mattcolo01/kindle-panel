@@ -16,6 +16,12 @@ export WIFI_TEST_IP=${WIFI_TEST_IP:-""}
 # setup-hosts.sh maps it to WIFI_TEST_IP. Example: https://kindle-gateway.local:8443
 export GATEWAY_URL=${GATEWAY_URL:-""}
 
+# Optional ARP fallback: if the configured IP no longer belongs to this MAC,
+# scan this /24 network and update /etc/hosts. Both values are required.
+export GATEWAY_MAC=${GATEWAY_MAC:-""}
+export GATEWAY_ARP_NETWORK=${GATEWAY_ARP_NETWORK:-""}
+export GATEWAY_ARP_PARALLELISM=${GATEWAY_ARP_PARALLELISM:-16}
+
 # The Kindle token goes in local/token (one line, not committed to git).
 # Setting KINDLE_TOKEN here instead also works.
 

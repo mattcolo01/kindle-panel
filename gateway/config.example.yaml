@@ -2,6 +2,12 @@
 timezone: "Europe/Rome"
 ha_url: "http://homeassistant:8123"      # rete docker o IP LAN
 
+# Recupero opzionale dopo un errore di connessione a HA. Richiede che il
+# container usi network_mode: host e cap_add: [NET_RAW] (vedi compose.yaml),
+# e funziona solo sulla stessa LAN/VLAN di HA.
+# ha_mac: "00:11:22:33:44:55"
+# ha_arp_interface: "eth0"                # opzionale se arp-scan rileva quella giusta
+
 # Plancia di HA da mostrare: il suo URL path, cioè la parte dopo l'host
 # nell'indirizzo del browser (http://ha:8123/dashboard-kindle -> dashboard-kindle).
 # Viene disegnata la prima vista; delle card sono supportate solo heading e

@@ -22,6 +22,10 @@ services:
       - ./secrets/kindle_token:/run/secrets/kindle_token:ro
     networks:
       - homeassistant
+    # Per ha_mac (recupero ARP) sostituisci `ports` e `networks` con:
+    # network_mode: host
+    # cap_add:
+    #   - NET_RAW
 
 networks:
   homeassistant:

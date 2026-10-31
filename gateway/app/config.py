@@ -21,6 +21,7 @@ ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 # characters the HA dashboard dialog accepts (a-zA-Z0-9_-, see
 # dialog-lovelace-dashboard-detail.ts), single words included ("lovelace").
 DASHBOARD_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+MAC_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
 
 class ConfigError(Exception):
@@ -43,6 +44,8 @@ class Settings:
     kindle_token: str
     dashboard: str | None = None  # url_path; None in rows mode
     language: str = DEFAULT_LANGUAGE
+    ha_mac: str | None = None
+    ha_arp_interface: str | None = None
 
 
 def read_secret(name: str, env: dict[str, str]) -> str:
@@ -100,6 +103,15 @@ def parse_config(data: object) -> dict:
     if not isinstance(ha_url, str) or not re.match(r"^https?://", ha_url):
         raise ConfigError("ha_url must be an http:// or https:// URL")
 
+    ha_mac = data.get("ha_mac")
+    if ha_mac is not None and (not isinstance(ha_mac, str) or not MAC_RE.match(ha_mac)):
+        raise ConfigError("ha_mac must be a MAC address such as 00:11:22:33:44:55")
+    ha_arp_interface = data.get("ha_arp_interface")
+    if ha_arp_interface is not None and (not isinstance(ha_arp_interface, str) or not ha_arp_interface):
+        raise ConfigError("ha_arp_interface must be a non-empty interface name")
+    if ha_arp_interface is not None and ha_mac is None:
+        raise ConfigError("ha_arp_interface requires ha_mac")
+
     if ("rows" in data) == ("dashboard" in data):
         raise ConfigError("Set exactly one of rows (entity list) and dashboard (HA dashboard URL path)")
     rows: tuple[Row, ...] = ()
@@ -124,6 +136,8 @@ def parse_config(data: object) -> dict:
         "rows": rows,
         "dashboard": dashboard,
         "language": language,
+        "ha_mac": ha_mac.lower() if ha_mac else None,
+        "ha_arp_interface": ha_arp_interface,
     }
 
 
