@@ -343,6 +343,19 @@ export GATEWAY_ARP_NETWORK="192.168.1"       # rete /24 da esplorare
 
 All'avvio e prima di ogni fetch il Kindle verifica che l'IP noto appartenga a quel MAC. Se non è così, fa una scansione ARP limitata alla `/24` indicata (massimo 16 probe parallele), salva l'IP trovato in `local/state/gateway_ip` e aggiorna `/etc/hosts`. La scansione consuma rete e batteria, quindi viene usata solo nel caso di errore; per reti diverse da `/24` è preferibile la prenotazione DHCP oppure DNS locale.
 
+Dettagli:
+- **Ping con scadenza:** il `ping` del busybox del K4 (1.7.2) non ha `-W`/`-w` e, verso un host che non risponde, aspetta fino a 10 s. Ogni ping parte quindi in background e viene interrotto dopo 2 s per l'IP noto e dopo 1 s per ogni gruppo della scansione;
+- **verifica dell'IP:** conta solo se risponde al ping **e** la tabella ARP gli dà quel MAC. Il kernel conserva a lungo le voci ARP vecchie, quindi il vecchio IP del server può mostrare ancora il suo MAC;
+- **attesa del Wi-Fi:** dopo il risveglio, prima di provare qualunque IP, aspetta fino a 30 s che `wifid` riporti `cmState` `CONNECTED`. Se non succede non fa la scansione e tiene l'ultimo IP noto;
+- **IP di ripiego:** se il MAC non si trova da nessuna parte resta l'ultimo IP che aveva funzionato (`local/state/gateway_ip`), oppure `WIFI_TEST_IP` se non ce n'è uno.
+
+| Log | Significato |
+|---|---|
+| nessuna riga `gateway discovery` | IP noto verificato al primo tentativo: è il caso normale |
+| `gateway discovery: scanning ...` + `found ... at <ip>` | Il server ha cambiato IP ed è stato ritrovato |
+| `gateway discovery: MAC ... not found; keeping <ip>` | Server spento o MAC sbagliato in `device.sh` |
+| `gateway discovery: Wi-Fi not connected (...)` | Il Wi-Fi non si è collegato entro 30 s |
+
 ### Ruotare i token
 
 - **Token del Kindle:**

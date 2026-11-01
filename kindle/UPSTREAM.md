@@ -85,4 +85,6 @@ Gli altri codici d'uscita sono 1 per errori di connessione o TLS e 2 per il time
    - **`src/stop.sh`**: ferma anche `buttons.sh` e i suoi `dd`;
    - **`src/local/env.sh`**: `KINDLE_BUTTONS` e `BUTTON_WINDOW_SECONDS`.
 
+8. **`src/discover-gateway.sh`** (nuovo, chiamato da `setup-hosts.sh`): ritrova il gateway dal suo MAC quando cambia IP; vedi il README, *Recuperare automaticamente un IP DHCP con ARP*. Funziona con il `ping` di busybox 1.7.2, che accetta solo `-q -v -c -s -I -4`: niente `-W`, quindi ogni ping ha una scadenza gestita dalla shell. Aspetta anche che `wifid` sia `CONNECTED` prima di provare.
+
    Il resto è invariato: `wait-for-wifi.sh`, `start.sh`, `low-battery.sh`, il log della batteria e `sleeping.png`.
