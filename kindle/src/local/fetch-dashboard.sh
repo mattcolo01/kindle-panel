@@ -32,13 +32,26 @@ if [ -z "$GATEWAY_URL" ] || [ -z "$KINDLE_TOKEN" ] || [ ! -f "$CA_FILE" ]; then
   exit 1
 fi
 
-if command -v md5sum >/dev/null 2>&1; then
-  hash_cmd="md5sum"
-elif command -v sha1sum >/dev/null 2>&1; then
-  hash_cmd="sha1sum"
-else
-  hash_cmd="cksum"
-fi
+# The K4 busybox has none of these: then the new image is compared with the
+# one on the screen ("$out") itself, and last_hash only says "content".
+hash_cmd=""
+for cmd in md5sum sha1sum cksum; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    hash_cmd=$cmd
+    break
+  fi
+done
+
+same_file() {
+  [ -f "$2" ] || return 1
+  if command -v cmp >/dev/null 2>&1; then
+    cmp -s "$1" "$2"
+  else
+    # ash drops NUL bytes from $(...): two PNGs differing only there are not
+    # a practical concern, since zlib data and CRCs change too
+    [ "$(cat "$1")" = "$(cat "$2")" ]
+  fi
+}
 
 mkdir -p "$STATE_DIR"
 tmp="$STATE_DIR/dash.png.tmp"
@@ -55,10 +68,24 @@ if [ "$xh_status" -ne 0 ]; then
   exit 1
 fi
 
-new_hash=$($hash_cmd <"$tmp")
-# An empty hash (hash command failed) never counts as unchanged
-if [ -n "$new_hash" ] && [ -f "$LAST_HASH_FILE" ] &&
-  [ "$new_hash" = "$(cat "$LAST_HASH_FILE")" ]; then
+unchanged=false
+if [ -n "$hash_cmd" ]; then
+  new_hash=$($hash_cmd <"$tmp")
+  # An empty hash (hash command failed) never counts as unchanged
+  if [ -n "$new_hash" ] && [ -f "$LAST_HASH_FILE" ] &&
+    [ "$new_hash" = "$(cat "$LAST_HASH_FILE")" ]; then
+    unchanged=true
+  fi
+else
+  new_hash=content
+  # last_hash missing: the screen does not show "$out" (see dash.sh)
+  if [ -f "$LAST_HASH_FILE" ] && [ "$(cat "$LAST_HASH_FILE")" = content ] &&
+    same_file "$tmp" "$out"; then
+    unchanged=true
+  fi
+fi
+
+if [ "$unchanged" = true ]; then
   rm -f "$tmp"
   echo "Dashboard image unchanged"
   exit 2

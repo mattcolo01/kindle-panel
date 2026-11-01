@@ -73,7 +73,7 @@ Gli altri codici d'uscita sono 1 per errori di connessione o TLS e 2 per il time
    - nuovo target `lint` (`shellcheck -s ash` + `shfmt -i 2 -d`, come nella CI upstream).
 
 7. **Pulsanti del Kindle** (vedi il README, *Pulsanti del Kindle*):
-   - **`src/buttons.sh`** (nuovo): un `dd` per ogni `/dev/input/event*` tiene aperto il device e copia i record `input_event` da 16 byte in una pipe, così nessun evento va perso tra due pressioni. Ogni record viene decodificato con `od -d`, che c'è in ogni busybox, e conta solo la pressione (`EV_KEY` con valore 1). I codici dei tasti del K4 NT vengono da KOReader (`event_map_kindle4.lua`). Back crea `/tmp/kindle-dash/exit`, gli altri tasti accodano il loro nome in `/tmp/kindle-dash/presses`, su tmpfs;
+   - **`src/buttons.sh`** (nuovo): un `dd` per ogni `/dev/input/event*` tiene aperto il device e copia i record `input_event` da 16 byte in una pipe, così nessun evento va perso tra due pressioni. Il busybox del K4 non ha `od` né `hexdump`, quindi ogni record viene decodificato con il solo `tr`, che trasforma ogni byte in un carattere: 0x00 → `0`, 0x01 → `1`, il codice di ogni tasto → la sua lettera, il resto → `.`. Conta solo la pressione (`EV_KEY` con valore 1). Gli eventi di tasti sconosciuti vengono accodati grezzi in `logs/unknown-keys.bin`. I codici dei tasti del K4 NT vengono da KOReader (`event_map_kindle4.lua`). Back crea `/tmp/kindle-dash/exit`, gli altri tasti accodano il loro nome in `/tmp/kindle-dash/presses`, su tmpfs;
    - **`src/dash.sh`**:
      - avvia `buttons.sh` dopo `framework stop`, così il framework non vede i tasti;
      - salva il governor della CPU;
@@ -81,6 +81,7 @@ Gli altri codici d'uscita sono 1 per errori di connessione o TLS e 2 per il time
      - `rtc_sleep` riconosce il risveglio dal tasto di accensione, cioè prima dell'allarme RTC, come fa il fork [kindle-calendar](https://gitea.biboer.cn/gavin/kindle-calendar) su K4. In quel caso la finestra successiva dura `BUTTON_WINDOW_SECONDS`;
      - `next-wakeup` viene ricalcolato dopo la finestra, che può durare più di 10 s;
    - **`src/local/fetch-dashboard.sh`**: gli argomenti dopo il file sono i tasti premuti. Con tasti la richiesta diventa `xh post "$GATEWAY_URL/press" button==<nome> ...`, che risponde con il PNG come la GET. Verificato con xh 0.16.1 (build x86_64 della stessa release);
+   - **`src/local/fetch-dashboard.sh`**, hash: il busybox del K4 non ha `md5sum`, `sha1sum` né `cksum`. Prima l'hash usciva sempre vuoto, quindi ogni immagine contava come nuova e veniva ridisegnata. Senza un comando di hash, ora l'immagine nuova viene confrontata con `dash.png`, cioè quella a schermo: con `cmp` se c'è, altrimenti confrontando il contenuto in shell. `last_hash` contiene allora `content` e conserva il suo ruolo: se manca, l'immagine va ridisegnata comunque;
    - **`src/stop.sh`**: ferma anche `buttons.sh` e i suoi `dd`;
    - **`src/local/env.sh`**: `KINDLE_BUTTONS` e `BUTTON_WINDOW_SECONDS`.
 

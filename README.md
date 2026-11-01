@@ -385,12 +385,13 @@ kindle/src/local/{ca.pem,token,device.sh}
 | `setup-hosts: added ...` / `already maps ...` | Voce in `/etc/hosts` aggiunta oppure già presente |
 | `setup-hosts: ...` (errore), seguito dalla versione di BusyBox | Il dashboard non parte e il Kindle resta utilizzabile. `/etc/hosts` non è stato modificato: mancano `GATEWAY_URL`/`WIFI_TEST_IP` (`local/device.sh`) oppure il remount di `/` è fallito |
 | `Partial screen refresh` / `Full screen refresh` | Nuova immagine disegnata |
-| `Dashboard image unchanged` + `Not updating screen, fetch-dashboard returned 2` | Dati invariati, schermo non ridisegnato |
+| `Dashboard image unchanged` + `Not updating screen, fetch-dashboard returned 2` | Dati invariati, schermo non ridisegnato. Il busybox del K4 non ha `md5sum`, `sha1sum` né `cksum`: in quel caso l'immagine nuova viene confrontata direttamente con `dash.png` |
 | `Fetch failed, xh returned N` + `... returned 1` | Download fallito, resta l'immagine precedente. `N`: 1 = connessione/TLS/DNS, 2 = timeout, 4 = HTTP 4xx (401: token errato), 5 = HTTP 5xx (503: il gateway non raggiunge HA) |
 | `Missing configuration: ...` | Mancano `GATEWAY_URL`, `local/token` o `local/ca.pem` |
 | `Couldn't connect to Wi-Fi` / `No test ip specified` | Il ping verso `WIFI_TEST_IP` fallisce, oppure `WIFI_TEST_IP` è vuoto |
-| `Key 191: right_next` | Tasto premuto e riconosciuto |
-| `Key N: not a dashboard key` | Codice non associato a nessun tasto: se è uno dei 13 tasti, il codice del tuo Kindle è diverso da quello in `buttons.sh` |
+| `Reading keys from: /dev/input/event0 ...` | All'avvio: i device letti per i tasti |
+| `Key right_next` | Tasto premuto e riconosciuto |
+| `Unknown key: raw event appended to .../unknown-keys.bin` | Tasto con un codice fuori da `KEYS` in `buttons.sh` (il tasto di accensione, oppure un codice diverso su questo Kindle). Il record da 16 byte finisce in `logs/unknown-keys.bin`: il codice sono i byte 10-11, little endian |
 | `Keys pressed: ...` | Tasti inviati al gateway con la richiesta dell'immagine |
 | `Woken up by the power button` | Risveglio prima dell'allarme RTC: finestra lunga per i tasti |
 | `Ignoring keys: ...` | Tasti scartati: dashboard non a schermo, `KINDLE_BUTTONS=false`, aggiornamento fallito o immagine cambiata nel frattempo |
@@ -447,7 +448,7 @@ Via SSH: `DEBUG=true /mnt/us/dashboard/start.sh`. Gira in primo piano con `set -
 - [ ] Sospensione e risveglio RTC funzionano.
 - [ ] Livello batteria registrato per 24 ore.
 - [ ] L'ora del Kindle è corretta (`date` nel log).
-- [ ] Pulsanti: dopo **accensione** il log riporta `Woken up by the power button`. Ogni tasto premuto compare come `Key <codice>: <nome>`, e il nome corrisponde al tasto fisico. I codici vengono da KOReader e non sono ancora verificati su questo Kindle.
+- [ ] Pulsanti: dopo **accensione** il log riporta `Woken up by the power button`. Ogni tasto premuto compare come `Key <nome>`, e il nome corrisponde al tasto fisico. I codici vengono da KOReader: un tasto con un codice diverso compare come `Unknown key` e il suo evento finisce in `logs/unknown-keys.bin`.
 - [ ] Il simbolo dei tasti pagina corrisponde alla posizione reale: tasto corto in alto = indietro, lungo in basso = avanti.
 - [ ] Accensione + tasto spunta il task indicato, e l'immagine nuova arriva entro pochi secondi.
 - [ ] Accensione + Indietro riporta all'interfaccia Amazon senza riavvio, e da lì USB e KUAL funzionano.
